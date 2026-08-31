@@ -1,0 +1,21 @@
+{
+    "Engineering": [
+      { "id_employe": "EMP-ENG-001", "nom": "Aziz Daoud", "email": "zizoudh06@gmail.com", "poste": "Lead Network Expert" },
+      { "id_employe": "EMP-ENG-002", "nom": "Rami Ben Salah", "email": "rami.eng@entreprise.tn", "poste": "DevOps Engineer" }
+    ],
+    "Finance": [
+      { "id_employe": "EMP-FIN-001", "nom": "Marwa Mansouri", "email": "marwa.m@entreprise.tn", "poste": "Comptable Senior" },
+      { "id_employe": "EMP-FIN-002", "nom": "Karim Karray", "email": "karim.fin@entreprise.tn", "poste": "Auditeur Financier" }
+    ],
+    "Direction": [
+      { "id_employe": "EMP-DIR-001", "nom": "Anis Daoud", "email": "anis.daoud@arch.tn", "poste": "Directeur Général" }
+    ],
+    "Sécurité": [
+      { "id_employe": "EMP-SEC-001", "nom": "SOC Team", "email": "soc-alerts@entreprise.tn", "poste": "Analyste SOC" }
+    ],
+    "IT": [
+        { "id_employe": "EMP-IT-001", "nom": "Aziz Dhifaoui", "email": "azizdhifaoui06@gmail.com", "poste": "Senior DEV" },
+        { "id_employe": "EMP-IT-002", "nom": "Med Aziz Ghidhaoui", "email": "zizoudh06@gmail.com", "poste": "Senior ISTQB" },
+        { "id_employe": "EMP-IT-003", "nom": "Jasser Saadallah", "email": "top.picasso53@gmail.com", "poste": "Senior SEO" }
+    ]
+  }
