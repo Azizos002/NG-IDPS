@@ -244,6 +244,11 @@ def traiter_alerte_suricata(message: dict, actifs_critiques: set, producer: Kafk
         if bloquer_ip(src_ip, actifs_critiques) and generer_rapport_ia:
             notifier_agent_ia(producer, src_ip, "Multi-Source", f"Corrélation forte validée. Signature : {signature}", auto_blocked=True)
 
+    elif "[CRITIQUE]" in signature:
+        logger.warning(f"[SURICATA BYPASS] Alerte [CRITIQUE] détectée pour IP={src_ip} — Signature : {signature}")
+        if bloquer_ip(src_ip, actifs_critiques) and generer_rapport_ia:
+            notifier_agent_ia(producer, src_ip, "Suricata (Critique Bypass)", f"Menace critique identifiée par signature : {signature}", auto_blocked=True)
+
     elif severity <= 2:
         logger.info(f"[PALIER 2] Alerte Suricata sévérité {severity} pour IP={src_ip}")
         if src_ip not in ips_en_cours_ia:
