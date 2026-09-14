@@ -1,0 +1,11 @@
+{
+    "seuil_utilise": 26.09591054916382,
+    "true_negatives": 428445,
+    "false_positives": 25906,
+    "false_negatives": 276201,
+    "true_positives": 281643,
+    "precision": 0.9157662681393859,
+    "recall": 0.5048777077462516,
+    "f1_score": 0.6509019601498972,
+    "fpr": 0.05701759212591147
+}

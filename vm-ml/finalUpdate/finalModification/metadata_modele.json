@@ -1,0 +1,10 @@
+{
+    "architecture": "LSTM-VAE (64-32-16-32-64)",
+    "taille_fenetre": 10,
+    "nb_features": 16,
+    "seuil_3sigma_baseline": 63.913915157318115,
+    "mu_validation": 7.18690824508667,
+    "sigma_validation": 18.90900230407715,
+    "duree_entrainement_sec": 11746.33,
+    "seuil_optimal_calibre": 63.78517150878906
+}
