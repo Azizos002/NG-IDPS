@@ -1,6 +1,6 @@
 """
 soar.py
-Sprint 4, 5 & 6 - Orchestrateur SOAR & Bridge Agent IA
+- Orchestrateur SOAR & Bridge Agent IA -
 + Bouclier Anti-DDoS Global (SSH) & Protection Anti-Saturation LLM
 
 Consolide les alertes du LSTM-VAE et de Suricata, applique une logique
