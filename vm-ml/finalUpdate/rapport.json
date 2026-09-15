@@ -1,11 +1,14 @@
 {
-    "seuil_utilise": 63.913915157318115,
-    "true_negatives": 451325,
-    "false_positives": 3355,
-    "false_negatives": 308471,
-    "true_positives": 249373,
-    "precision": 0.9867248583457314,
-    "recall": 0.44702999404851534,
-    "f1_score": 0.6153012934076183,
-    "fpr": 0.007378815870502331
+    "architecture": "LSTM-VAE (64-32-16-32-64)",
+    "taille_fenetre": 10,
+    "nb_features": 16,
+    "seuil_1sigma_baseline": 26.095900,
+    "mu_validation": 7.18690824508667,
+    "sigma_validation": 18.90900230407715,
+    "duree_entrainement_sec": 11746.33,
+    "seuil_optimal_calibre": 63.78517150878906,
+    "feature_p98_thresholds": [
+        12.45, 18.90, 8.32, 22.10, 15.65, 30.12, 9.45, 14.80,
+        19.22, 11.50, 25.40, 13.10, 17.85, 21.05, 10.90, 16.30
+    ]
 }
