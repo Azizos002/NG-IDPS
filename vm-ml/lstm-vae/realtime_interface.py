@@ -169,7 +169,8 @@ def warm_up(modele):
 # État par IP source (buffer glissant + compteur de persistance)
 # ============================================================
 buffers_par_ip = defaultdict(lambda: deque(maxlen=TAILLE_FENETRE))
-compteurs_depassement = defaultdict(int)
+# Stockage de l'historique des 5 dernières évaluations par IP (fenêtre glissante)
+historique_evaluations_ip = defaultdict(lambda: deque(maxlen=5))
 
 
 def extraire_features(message: dict):
@@ -262,28 +263,35 @@ def traiter_message(message: dict, modele, scaler, feature_thresholds, seuil_1si
     # --- CONDITION HYBRIDE (OR logique) ---
     anomalie_ml_stricte = (vote_count >= 4) or (mse_global >= seuil_1sigma_baseline)
 
-    # --- LOGIQUE DE CORRÉLATION HYBRIDE ---
-    if anomalie_ml_stricte or spam_detecte:
-        compteurs_depassement[src_ip] += 1
-        if spam_detecte and not anomalie_ml_stricte:
-            logger.warning(f"[RATE-LIMITER] Trafic anormalement massif détecté sur {src_ip} ({nb_paquets_recents} p/2s) !")
-    else:
-        compteurs_depassement[src_ip] = 0
+    # --- LOGIQUE DE CORRÉLATION HYBRIDE (Fenêtre Glissante) ---
+    anomalie_actuelle = 1 if (anomalie_ml_stricte or spam_detecte) else 0
+
+    if spam_detecte and not anomalie_ml_stricte:
+        logger.warning(f"[RATE-LIMITER] Trafic anormalement massif détecté sur {src_ip} ({nb_paquets_recents} p/2s) !")
+
+    # Ajout du statut du paquet actuel dans l'historique de l'IP (max 5 éléments)
+    historique_evaluations_ip[src_ip].append(anomalie_actuelle)
+
+    # Le score de persistance est le nombre total d'anomalies dans la fenêtre récente
+    score_persistance = sum(historique_evaluations_ip[src_ip])
 
     logger.info(
         f"IP={src_ip} | MSE_global={mse_global:.4f} (Seuil 1σ={seuil_1sigma_baseline:.2f}) | "
         f"Votes={vote_count}/16 features | paquets_2s={nb_paquets_recents} | "
-        f"depassements={compteurs_depassement[src_ip]} | latence={latence_ms:.3f}ms"
+        f"Anomalies récentes={score_persistance}/5 | latence={latence_ms:.3f}ms"
     )
 
     # --- DÉCLENCHEMENT DE L'ALERTE / AUTO-BLOCAGE ---
-    if compteurs_depassement[src_ip] >= SEUIL_PERSISTANCE:
+    # Si l'IP cumule au moins SEUIL_PERSISTANCE (ex: 3) anomalies sur ses 5 derniers paquets
+    if score_persistance >= SEUIL_PERSISTANCE:
         if src_ip in WHITELIST_IPS:
             logger.error(f"*** SÉCURITÉ WHITELIST *** IP critique {src_ip} signalée suspecte mais PROTÉGÉE du blocage !")
         else:
             executer_auto_block(src_ip, mse_global, seuil_1sigma_baseline, latence_ms, producer_alertes)
 
-        compteurs_depassement[src_ip] = 0
+        # Réinitialiser l'historique de cette IP après déclenchement du blocage
+        historique_evaluations_ip[src_ip].clear()
+
 
 def executer_auto_block(src_ip, mse, seuil, latence_ms, producer_alertes):
     temps_actuel = time.time()
