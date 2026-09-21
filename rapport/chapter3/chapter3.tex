@@ -1,0 +1,567 @@
+%% ==========================================================================
+%%  CHAPITRE 3 — RELEASE 1 : DÉTECTION
+%%  NG-IDPS — PFE ISIMa
+%%
+%%  Paquets requis dans le préambule : amsmath, amssymb, booktabs, tabularx,
+%%  graphicx, xcolor, listings, algorithm2e, float, hyperref, babel[french]
+%%
+%%  CONVENTIONS DE PLACEHOLDERS (faciles à retrouver avec Ctrl+F) :
+%%    \FIG{...}   cadre réservé pour capture d'écran / diagramme / photo
+%%    \A{...}     valeur ou passage à compléter / à mettre à jour
+%%    \VERIF{...} incohérence entre sources à trancher avant le rendu final
+%%  Pour la version finale : remplacer chaque \FIG par \includegraphics,
+%%  et vider les macros (voir bloc ci-dessous) pour masquer les rappels.
+%% ==========================================================================
+
+%% --- Macros de placeholders (ne redéfinissent rien si déjà présentes) ------
+\providecommand{\A}[1]{\textcolor{red}{\textbf{[À COMPLÉTER : #1]}}}
+\providecommand{\VERIF}[1]{\textcolor{orange}{\textbf{[À VÉRIFIER : #1]}}}
+\providecommand{\FIG}[4]{%
+  % #1 = label, #2 = légende, #3 = type (Capture / Diagramme / Photo), #4 = description du contenu attendu
+  \begin{figure}[H]
+    \centering
+    \fbox{\parbox[c][5.5cm][c]{0.9\textwidth}{\centering
+      \textcolor{gray}{\textbf{[EMPLACEMENT — #3]}}\\[4pt]
+      \textcolor{gray}{\small #4}}}
+    \caption{#2}
+    \label{#1}
+  \end{figure}}
+
+\lstdefinestyle{ngidps}{basicstyle=\ttfamily\footnotesize, breaklines=true,
+  frame=single, numbers=left, numberstyle=\tiny, columns=fullflexible,
+  keepspaces=true, showstringspaces=false}
+
+%% ==========================================================================
+\chapter{Release 1 : Détection --- Ingestion parallèle et moteur stochastique}
+\label{chap:release1}
+%% ==========================================================================
+
+\section*{Introduction}
+\addcontentsline{toc}{section}{Introduction}
+
+Ce chapitre présente la première \emph{release} du projet NG-IDPS, consacrée à la couche de détection. Conformément à la démarche Scrum décrite au chapitre~\ref{chap:preparatoire}, cette release regroupe deux sprints complémentaires qui construisent, dans l'ordre, la chaîne de collecte puis le moteur d'analyse :
+
+\begin{itemize}
+  \item le \textbf{Sprint~1} met en place l'interception du trafic sur \texttt{vm-edge} et l'ingestion à \emph{double voie} : une voie \emph{Fast Data} (extraction de 16 caractéristiques statistiques transmises à Apache Kafka) et une voie \emph{Cold Data} (chaîne Filebeat $\rightarrow$ Logstash $\rightarrow$ Elasticsearch $\rightarrow$ Kibana pour l'investigation forensic) ;
+  \item le \textbf{Sprint~2} déploie sur \texttt{vm-ml} le moteur d'inférence Deep LSTM-VAE, la calibration hybride du seuil de décision, les pré-filtres volumétriques et le filtrage par persistance qui transforment un score brut en décision fiable.
+\end{itemize}
+
+Chaque sprint suit la même structure : introduction et objectif, \emph{sprint backlog}, analyse (cas d'utilisation), conception (diagrammes de séquence et de classes), réalisation (captures issues de l'implémentation réelle), validation, puis conclusion. Le tableau~\ref{tab:r1-synthese} résume le périmètre de la release.
+
+\begin{table}[H]
+\centering
+\caption{Périmètre de la Release~1 (Détection)}
+\label{tab:r1-synthese}
+\small
+\begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}X@{}}
+\toprule
+\textbf{Sprint} & \textbf{Objectif} & \textbf{Technologies clés} & \textbf{Livrable} \\
+\midrule
+Sprint 1 & Ingestion parallèle Fast/Cold Data & Suricata, Kafka, Filebeat, Logstash, Elasticsearch, Kibana & Sonde opérationnelle, bus Kafka, tableau de bord Kibana \\
+Sprint 2 & Détection stochastique et filtrage par persistance & TensorFlow/Keras (LSTM-VAE 16f), \texttt{deque}, Kafka & \texttt{realtime\_interface.py} publiant les événements d'anomalie \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\FIG{fig:r1-vue-globale}{Vue d'ensemble de la Release~1 : de la capture réseau à la décision de détection}{Diagramme}{Diagramme de composants (PlantUML/TikZ) : vm-edge (Suricata, Filebeat, edge\_collector) $\rightarrow$ Kafka sur vm-ml $\rightarrow$ realtime\_interface (LSTM-VAE) $\rightarrow$ événement d'anomalie ; branche Cold Data vers ELK. À produire depuis le diagramme d'architecture global mis à jour.}
+
+%% ==========================================================================
+\section{Sprint 1 : Ingestion parallèle et stack ELK}
+\label{sec:sprint1}
+%% ==========================================================================
+
+\subsection{Introduction et objectif du sprint}
+
+L'objectif du premier sprint est de déployer la sonde Suricata sur \texttt{vm-edge} et d'établir une ingestion à double voie, chacune répondant à un besoin opérationnel distinct. La voie \emph{Fast Data} alimente en continu le moteur d'analyse en vecteurs de caractéristiques compacts, avec une latence compatible avec une détection en temps réel. La voie \emph{Cold Data} conserve l'intégralité des journaux bruts (\texttt{eve.json}) afin de permettre l'analyse rétrospective, l'enrichissement géographique et l'investigation forensic sans jamais charger la voie critique.
+
+Cette séparation est un choix d'architecture délibéré : coupler l'historisation lourde (indexation, agrégations) à la détection temps réel exposerait cette dernière aux variations de charge d'Elasticsearch. Les deux voies partagent donc la même source (Suricata) mais aucun goulot d'étranglement.
+
+\subsection{Sprint backlog}
+
+\begin{table}[H]
+\centering
+\caption{Sprint backlog du Sprint~1}
+\label{tab:backlog-s1}
+\small
+\begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}Xcc@{}}
+\toprule
+\textbf{ID} & \textbf{User story} & \textbf{Priorité} & \textbf{Statut} \\
+\midrule
+US1.1 & En tant qu'analyste SOC, je veux que le trafic du réseau soit capturé et inspecté par Suricata afin de détecter les menaces connues. & Haute & \A{statut} \\
+US1.2 & En tant que moteur ML, je veux recevoir en continu 16 caractéristiques statistiques par fenêtre de flux via Kafka afin de calculer un score d'anomalie. & Haute & \A{statut} \\
+US1.3 & En tant qu'analyste, je veux que les journaux \texttt{eve.json} soient indexés et enrichis (géolocalisation) afin d'investiguer un incident a posteriori. & Moyenne & \A{statut} \\
+US1.4 & En tant qu'analyste, je veux un tableau de bord Kibana d'historisation afin de visualiser les alertes et leur origine géographique. & Moyenne & \A{statut} \\
+US1.5 & En tant qu'administrateur, je veux que la latence de bout en bout de la chaîne reste de quelques secondes afin de garantir une détection exploitable. & Haute & \A{statut} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\A{Ajouter les estimations en points de complexité si utilisées dans le chapitre 2, et aligner les identifiants (US1.x) avec les issues GitHub Projects.}
+
+\subsection{Analyse}
+
+\subsubsection{Acteurs et cas d'utilisation}
+
+Trois acteurs interagissent avec les fonctionnalités de ce sprint : l'\emph{analyste SOC}, qui consulte les tableaux de bord et investigue ; le \emph{moteur d'analyse ML}, consommateur du flux Kafka ; et l'\emph{administrateur système}, qui configure la sonde et surveille la chaîne.
+
+\FIG{fig:uc-s1}{Diagramme de cas d'utilisation du Sprint~1}{Diagramme}{Diagramme UML de cas d'utilisation : acteurs Analyste SOC, Moteur ML, Administrateur ; cas : Capturer le trafic, Extraire les 16 caractéristiques, Publier sur Kafka, Indexer les journaux, Enrichir (GeoIP), Consulter Kibana, Configurer la sonde.}
+
+\begin{table}[H]
+\centering
+\caption{Description textuelle du cas d'utilisation « Extraire et publier les caractéristiques »}
+\label{tab:uc-s1-features}
+\small
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Élément} & \textbf{Description} \\
+\midrule
+Acteur principal & Moteur d'analyse ML (consommateur) ; déclencheur : trafic réseau observé par la sonde \\
+Pré-conditions & Suricata actif sur \texttt{vm-edge} ; broker Kafka joignable sur \texttt{vm-ml} \\
+Scénario nominal & (1)~Suricata produit les événements de flux ; (2)~\texttt{edge\_collector.py} agrège les flux par fenêtre et calcule les 16 caractéristiques ; (3)~le vecteur est sérialisé en JSON ; (4)~le producteur Kafka le publie sur le topic \texttt{network-features} \\
+Scénario alternatif & Broker indisponible : le producteur signale l'échec et retente la connexion sans interrompre la capture \A{confirmer le comportement réel du producteur} \\
+Post-condition & Le vecteur est disponible pour consommation par \texttt{vm-ml} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Description textuelle du cas d'utilisation « Historiser et investiguer les journaux bruts »}
+\label{tab:uc-s1-cold}
+\small
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Élément} & \textbf{Description} \\
+\midrule
+Acteur principal & Analyste SOC \\
+Pré-conditions & Fichier \texttt{eve.json} alimenté ; Filebeat, Logstash, Elasticsearch et Kibana démarrés \\
+Scénario nominal & (1)~Filebeat lit \texttt{eve.json} sur \texttt{vm-edge} ; (2)~Logstash normalise et enrichit les événements (GeoIP) ; (3)~Elasticsearch indexe ; (4)~l'analyste filtre et pivote dans Kibana \\
+Post-condition & L'incident est reconstituable après coup (source, destination, signature, géolocalisation) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsubsection{Exigences non fonctionnelles}
+
+La latence de bout en bout entre l'apparition du trafic et la disponibilité du vecteur pour l'analyse constitue l'exigence non fonctionnelle dominante. La contrainte globale de la Release~1 est un SLA d'inférence inférieur à \SI{15}{\milli\second} (traité au sprint~2) ; la chaîne d'ingestion doit, elle, ramener la latence de détection de bout en bout à quelques secondes.
+
+\subsection{Conception}
+
+\subsubsection{Architecture à double voie}
+
+\FIG{fig:archi-double-voie}{Architecture d'ingestion à double voie (Fast Data / Cold Data)}{Diagramme}{Schéma de déploiement : Suricata $\rightarrow$ (a) edge\_collector.py $\rightarrow$ Kafka [suricata-alerts, network-features] ; (b) eve.json $\rightarrow$ Filebeat $\rightarrow$ Logstash (GeoIP) $\rightarrow$ Elasticsearch $\rightarrow$ Kibana. Indiquer les IP (vm-edge 192.168.56.128, vm-ml 192.168.56.130) et le port Kafka 9092.}
+
+Le tableau~\ref{tab:topics-r1} liste les topics Kafka utilisés par la Release~1.
+
+\begin{table}[H]
+\centering
+\caption{Topics Kafka de la Release~1}
+\label{tab:topics-r1}
+\small
+\begin{tabularx}{\textwidth}{@{}llll>{\raggedright\arraybackslash}X@{}}
+\toprule
+\textbf{Topic} & \textbf{Producteur} & \textbf{Consommateur} & \textbf{Format} & \textbf{Rôle} \\
+\midrule
+\texttt{network-features} & \texttt{edge\_collector.py} & \texttt{realtime\_interface.py} & JSON (16 car.) & Voie Fast Data \\
+\texttt{suricata-alerts} & \texttt{vm-edge} & \A{consommateur} & JSON & Alertes de signature Suricata \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\VERIF{Les documents du projet ne s'accordent pas sur la liste exacte des topics (\texttt{alerts-raw}, \texttt{anomaly-detected}, \texttt{alerts-for-llm}, \texttt{incident-reports}, \texttt{soar-commands}\ldots). Relire les scripts Kafka réels et figer un tableau unique, identique dans les chapitres 3 et 4.}
+
+\subsubsection{Diagramme de séquence}
+
+\FIG{fig:seq-s1}{Diagramme de séquence de l'ingestion parallèle}{Diagramme}{Séquence : Réseau $\rightarrow$ Suricata $\rightarrow$ [par] edge\_collector $\rightarrow$ Producer Kafka $\rightarrow$ Broker (network-features) || Filebeat $\rightarrow$ Logstash $\rightarrow$ Elasticsearch $\rightarrow$ Kibana. Annoter les délais.}
+
+\subsubsection{Modèle de données du vecteur de caractéristiques}
+
+Chaque message publié sur \texttt{network-features} est un objet JSON contenant les 16 caractéristiques statistiques retenues à l'issue de la sélection supervisée (voir section~\ref{sec:selection-features}), auxquelles s'ajoutent des métadonnées d'identification du flux (horodatage, adresse source) nécessaires à la corrélation aval.
+
+\FIG{fig:classes-s1}{Modèle de données du message \texttt{network-features}}{Diagramme}{Diagramme de classes / schéma JSON : FeatureVector { timestamp, src\_ip, f1..f16 } ; relation avec l'événement Suricata.}
+
+\A{Insérer ici le tableau des 16 caractéristiques (nom, description, unité) en le recopiant exactement depuis \texttt{selected\_features\_global.json}.}
+
+\subsection{Réalisation}
+
+\subsubsection{Déploiement de la sonde Suricata}
+
+Suricata (version 8.0.6 dans l'environnement du projet) est déployé sur \texttt{vm-edge} en mode d'inspection de flux. Un point de réglage s'est révélé déterminant pour la détection temps réel : les délais d'expiration des flux. Avec les valeurs par défaut, un flux n'est finalisé, donc exporté, qu'après un délai de l'ordre de la minute, ce qui portait la latence de bout en bout à environ \SI{53}{\second}. Le réglage des \emph{flow-timeouts} à \SI{5}{\second} pour les flux nouveaux, \SI{10}{\second} pour les flux établis et \SI{2}{\second} pour les flux fermés a ramené cette latence à \SIrange{3}{4}{\second}, sans modifier la logique de détection.
+
+\begin{lstlisting}[style=ngidps, caption={Réglage des délais d'expiration des flux (\texttt{suricata.yaml})}, label={lst:suricata-timeouts}]
+flow-timeouts:
+  default:
+    new: 5
+    established: 10
+    closed: 2
+\end{lstlisting}
+\A{Remplacer par l'extrait réel de suricata.yaml (indentation, protocoles tcp/udp, éventuels autres paramètres).}
+
+\FIG{fig:suricata-run}{Suricata opérationnel sur \texttt{vm-edge} (état du service et journaux)}{Capture}{Capture de \texttt{systemctl status suricata} et de \texttt{tail -f eve.json} montrant des événements de flux.}
+
+\subsubsection{Extraction des caractéristiques et production Kafka}
+
+Le script \texttt{edge\_collector.py} agrège les événements de flux et calcule les 16 caractéristiques avant de les publier, de manière asynchrone, sur le topic \texttt{network-features} via un producteur Kafka pointant vers le broker de \texttt{vm-ml} (port 9092). Le broker fonctionne en mode KRaft, sans Zookeeper. Une anomalie de configuration rencontrée au cours de ce sprint mérite d'être documentée : lorsque \texttt{log.dirs} pointait vers \texttt{/tmp}, les métadonnées du broker étaient perdues au redémarrage ; le déplacer vers \texttt{/var/lib/kafka-logs} a rendu la persistance fiable.
+
+\begin{lstlisting}[style=ngidps, caption={Extrait de \texttt{edge\_collector.py} : publication du vecteur de caractéristiques}, label={lst:edge-collector}]
+# À COMPLÉTER : extrait réel (création du KafkaProducer,
+# construction du dictionnaire des 16 features, producer.send(...))
+\end{lstlisting}
+
+\FIG{fig:kafka-topics}{Topics Kafka créés et messages consommés (\texttt{kafka-console-consumer})}{Capture}{Capture du terminal montrant la liste des topics et un message JSON de \texttt{network-features}.}
+
+\subsubsection{Voie Cold Data : chaîne ELK}
+
+Sur \texttt{vm-edge}, Filebeat lit \texttt{eve.json} et l'expédie vers Logstash. Ce dernier applique un enrichissement GeoIP puis alimente Elasticsearch, dont les index sont exploités par Kibana. Cette voie est volontairement indépendante de Kafka : une indisponibilité de la stack ELK n'affecte pas la détection temps réel.
+
+\begin{lstlisting}[style=ngidps, caption={Configuration Filebeat et pipeline Logstash (extrait)}, label={lst:elk-config}]
+# À COMPLÉTER : filebeat.yml (input eve.json, output logstash)
+# et pipeline Logstash (filtre geoip, output elasticsearch)
+\end{lstlisting}
+
+\FIG{fig:kibana-dashboard}{Tableau de bord Kibana d'historisation des alertes}{Capture}{Capture du dashboard Kibana : volume d'alertes dans le temps, top signatures, carte de géolocalisation des sources.}
+
+\FIG{fig:kibana-discover}{Investigation forensic d'un événement dans Kibana Discover}{Capture}{Capture d'un document \texttt{eve.json} indexé avec ses champs GeoIP.}
+
+\subsection{Validation}
+
+La validation du sprint~1 vérifie que chaque maillon de la chaîne fonctionne et que la latence globale respecte l'objectif.
+
+\begin{table}[H]
+\centering
+\caption{Scénarios de validation du Sprint~1}
+\label{tab:validation-s1}
+\small
+\begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}Xc@{}}
+\toprule
+\textbf{ID} & \textbf{Scénario} & \textbf{Résultat attendu} & \textbf{Résultat observé} & \textbf{Statut} \\
+\midrule
+T1.1 & Génération de trafic depuis la machine d'attaque & Événements de flux visibles dans \texttt{eve.json} & \A{observé} & \A{OK/KO} \\
+T1.2 & Consommation du topic \texttt{network-features} & Messages JSON à 16 caractéristiques & \A{observé} & \A{OK/KO} \\
+T1.3 & Indexation ELK & Documents visibles dans Kibana avec GeoIP & \A{observé} & \A{OK/KO} \\
+T1.4 & Latence de bout en bout (avant/après réglage des timeouts) & Passage de $\approx$\SI{53}{\second} à \SIrange{3}{4}{\second} & \A{mesures} & \A{OK/KO} \\
+T1.5 & Redémarrage du broker & Topics et métadonnées conservés & \A{observé} & \A{OK/KO} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\FIG{fig:latence-s1}{Latence de bout en bout avant et après réglage des \emph{flow-timeouts}}{Diagramme}{Graphique à barres ou courbe : $\approx$53 s $\rightarrow$ 3--4 s. Données à tracer depuis les mesures du test T1.4.}
+
+\subsection{Conclusion du sprint~1}
+
+Le sprint~1 livre une sonde opérationnelle, un bus Kafka fiable et un tableau de bord Kibana d'historisation. La séparation Fast/Cold Data isole la voie critique de la voie d'investigation, et l'ajustement des délais d'expiration des flux ramène la latence de détection à quelques secondes. Le flux \texttt{network-features} constitue l'entrée du moteur stochastique développé au sprint suivant.
+
+%% ==========================================================================
+\section{Sprint 2 : Moteur stochastique et filtrage par persistance}
+\label{sec:sprint2}
+%% ==========================================================================
+
+\subsection{Introduction et objectif du sprint}
+
+Le second sprint implémente sur \texttt{vm-ml} l'inférence par apprentissage profond et, surtout, la logique qui transforme un score d'anomalie brut en décision exploitable. Une détection par apprentissage non supervisé produit naturellement des scores isolés et bruités ; l'enjeu n'est donc pas seulement de calculer une erreur de reconstruction, mais de définir un seuil calibré, de délester le moteur des pics volumétriques et de n'émettre une alerte que lorsqu'une anomalie \emph{persiste}. Le sprint est organisé autour de quatre volets : l'inférence Deep LSTM-VAE, la calibration hybride du seuil, les pré-filtres anti-DDoS et de limitation de débit, et le filtrage par persistance.
+
+\subsection{Sprint backlog}
+
+\begin{table}[H]
+\centering
+\caption{Sprint backlog du Sprint~2}
+\label{tab:backlog-s2}
+\small
+\begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}Xcc@{}}
+\toprule
+\textbf{ID} & \textbf{User story} & \textbf{Priorité} & \textbf{Statut} \\
+\midrule
+US2.1 & En tant que système, je veux calculer l'erreur de reconstruction (MSE) de chaque séquence par un LSTM-VAE afin de mesurer sa déviation par rapport au comportement normal. & Haute & \A{statut} \\
+US2.2 & En tant que système, je veux combiner un seuil global et un vote sur les caractéristiques afin de détecter à la fois les anomalies diffuses et ciblées. & Haute & \A{statut} \\
+US2.3 & En tant qu'administrateur, je veux un pré-filtre volumétrique et une limitation par IP afin de protéger le moteur lors d'une inondation. & Haute & \A{statut} \\
+US2.4 & En tant qu'analyste, je veux qu'une attaque ne soit confirmée qu'après plusieurs évaluations suspectes consécutives afin de limiter les fausses alertes. & Haute & \A{statut} \\
+US2.5 & En tant qu'administrateur, je veux protéger les actifs critiques par une liste blanche et un délai de \emph{cooldown} afin d'éviter les blocages en boucle. & Moyenne & \A{statut} \\
+US2.6 & En tant que composant aval, je veux recevoir des événements normalisés (\texttt{ANOMALY\_DETECTED}, \texttt{AUTO\_BLOCK\_IP}, \texttt{ENABLE\_DDOS\_SHIELD}) afin de déclencher la réponse. & Haute & \A{statut} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Analyse}
+
+\FIG{fig:uc-s2}{Diagramme de cas d'utilisation du Sprint~2}{Diagramme}{Cas d'utilisation : Calculer le score d'anomalie, Appliquer le vote sur les caractéristiques, Filtrer les pics volumétriques, Confirmer par persistance, Appliquer la liste blanche / cooldown, Publier un événement d'anomalie. Acteurs : Moteur ML, Composant SOAR (consommateur), Administrateur.}
+
+\begin{table}[H]
+\centering
+\caption{Description textuelle du cas d'utilisation « Confirmer une anomalie par persistance »}
+\label{tab:uc-s2-persistance}
+\small
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Élément} & \textbf{Description} \\
+\midrule
+Acteur principal & Moteur d'inférence \texttt{realtime\_interface.py} \\
+Pré-conditions & Modèle, scaler et métadonnées chargés ; flux \texttt{network-features} disponible \\
+Scénario nominal & (1)~Une séquence de 10 pas de temps est normalisée et reconstruite ; (2)~le MSE et le vote sur les caractéristiques sont évalués ; (3)~le résultat (suspect / non suspect) est ajouté à la fenêtre glissante de taille 5 ; (4)~si au moins 3 des 5 évaluations sont suspectes, l'attaque est confirmée et l'événement est publié \\
+Scénarios alternatifs & IP en liste blanche : aucune confirmation ; IP déjà traitée : événement supprimé pendant le \emph{cooldown} de \SI{300}{\second} \\
+Post-condition & Un événement d'anomalie est disponible pour la couche de réponse \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Conception}
+
+\subsubsection{Architecture du modèle Deep LSTM-VAE}
+\label{sec:archi-lstm-vae}
+
+Un auto-encodeur variationnel (VAE) apprend une distribution latente du trafic normal. Associé à des couches récurrentes (LSTM), il modélise la dépendance temporelle entre les pas d'une séquence. Le modèle retenu prend en entrée des séquences de $T=10$ pas de temps de $F=16$ caractéristiques, normalisées par un \texttt{StandardScaler} (\texttt{global\_scaler\_16f.pkl}). Son architecture symétrique est $64 \rightarrow 32 \rightarrow 16 \rightarrow 32 \rightarrow 64$ : deux couches LSTM d'encodage, un espace latent de dimension 16 échantillonné par une couche dédiée (\texttt{CoucheEchantillonnage}), puis deux couches LSTM de décodage. La régularisation par divergence de Kullback--Leibler est portée par une couche de perte personnalisée (\texttt{CoucheVAELoss}).
+
+La fonction objectif combine erreur de reconstruction et régularisation :
+\begin{equation}
+\mathcal{L}(\theta,\phi) \;=\; \underbrace{\mathbb{E}_{q_\phi(z|x)}\big[\lVert x-\hat{x}\rVert^2\big]}_{\text{reconstruction}} \;+\; \beta\,\underbrace{D_{KL}\big(q_\phi(z|x)\,\Vert\,p(z)\big)}_{\text{régularisation}}
+\label{eq:elbo}
+\end{equation}
+où $q_\phi(z|x)=\mathcal{N}(\mu_\phi(x),\sigma^2_\phi(x))$ est l'encodeur, $p(z)=\mathcal{N}(0,I)$ l'a priori et $\beta$ pondère la régularisation \A{valeur de $\beta$ utilisée à l'entraînement}.
+
+À l'inférence, le score d'anomalie est l'erreur quadratique moyenne de reconstruction de la séquence :
+\begin{equation}
+\mathrm{MSE}(x) \;=\; \frac{1}{T\cdot F}\sum_{t=1}^{T}\sum_{f=1}^{F}\big(x_{t,f}-\hat{x}_{t,f}\big)^2
+\label{eq:mse}
+\end{equation}
+L'inférence est \emph{déterministe} : le décodeur reçoit la moyenne $z_{\text{mean}}=\mu_\phi(x)$ de l'espace latent, et non un échantillon aléatoire. Cette variante supprime la variance d'échantillonnage sur le score, ce qui rend la décision reproductible et réduit la latence.
+
+\FIG{fig:archi-lstm-vae}{Architecture du Deep LSTM-VAE (64--32--16--32--64)}{Diagramme}{Schéma en blocs : entrée (10$\times$16) $\rightarrow$ LSTM 64 $\rightarrow$ LSTM 32 $\rightarrow$ ($\mu$, $\log\sigma^2$) $\rightarrow$ Sampling (dim 16) $\rightarrow$ LSTM 32 $\rightarrow$ LSTM 64 $\rightarrow$ sortie reconstruite (10$\times$16). Figurer la couche VAELoss.}
+
+\subsubsection{Sélection supervisée des caractéristiques}
+\label{sec:selection-features}
+
+Le corpus d'entraînement initial comportait 32 caractéristiques. Une première sélection non supervisée (seuil de variance puis filtrage par corrélation de Pearson) s'est avérée insuffisante : elle conservait des variables peu discriminantes. La sélection supervisée \texttt{SelectKBest} avec le test statistique ANOVA (statistique $F$) a fourni de bien meilleurs résultats en classant les variables selon leur capacité à séparer trafic normal et trafic d'attaque, et a permis de réduire l'espace à 16 caractéristiques. Cette réduction fut la correction décisive du modèle, comme le montre la comparaison du tableau~\ref{tab:comp-selection}.
+
+\begin{table}[H]
+\centering
+\caption{Comparaison des stratégies de sélection de caractéristiques}
+\label{tab:comp-selection}
+\small
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}Xcccc@{}}
+\toprule
+\textbf{Stratégie} & \textbf{Nb car.} & \textbf{Recall} & \textbf{FPR} & \textbf{F1} \\
+\midrule
+Toutes les caractéristiques (baseline) & 32 & \A{} & \A{} & \A{} \\
+Variance + Pearson (non supervisé) & \A{} & \A{} & \A{} & \A{} \\
+\textbf{SelectKBest ANOVA (supervisé)} & \textbf{16} & \textbf{\A{}} & \textbf{\A{}} & \textbf{\A{}} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\FIG{fig:anova-scores}{Scores $F$ (ANOVA) des caractéristiques classées par pouvoir discriminant}{Diagramme}{Diagramme à barres horizontales des scores SelectKBest, avec la coupure à 16 caractéristiques. À tracer depuis \texttt{feature\_selector.py}.}
+
+Les caractéristiques retenues sont enregistrées dans \texttt{selected\_features\_global.json}, qui est une \emph{liste plate} (et non un dictionnaire) ; le chargeur du moteur d'inférence en tient compte.
+
+\subsubsection{Calibration hybride du seuil (OR-Gate)}
+\label{sec:calibration}
+
+La décision de rattacher une séquence au trafic anormal repose sur deux mécanismes complémentaires combinés par un OU logique (\emph{OR-gate}).
+
+\paragraph{Seuil global.} Sur le jeu de validation composé de trafic normal, les statistiques du MSE sont $\mu = 7{,}1869$ et $\sigma = 18{,}9090$. Le seuil global opérationnel est fixé à $\mu+\sigma$ :
+\begin{equation}
+\tau_{\text{global}} \;=\; \mu + 1\cdot\sigma \;=\; 7{,}1869 + 18{,}9090 \;\approx\; 26{,}0959
+\label{eq:seuil}
+\end{equation}
+Deux autres seuils ont été évalués, présentés au tableau~\ref{tab:comp-seuils}. Le seuil $\mu+3\sigma \approx 63{,}91$ et le seuil optimal calibré par maximisation du score $F_1$ ($\approx 63{,}79$) sont très conservateurs : ils minimisent les fausses alertes mais laissent passer une grande part des anomalies modérées. Le choix de $\mu+\sigma$ est une augmentation délibérée de la sensibilité ; le bruit qui en résulte n'est pas traité au niveau du seuil mais en aval, par le filtrage par persistance et la liste blanche (voir sections suivantes), ce qui est un compromis assumé plutôt qu'une faiblesse de conception.
+
+\begin{table}[H]
+\centering
+\caption{Comparaison des seuils de décision globaux}
+\label{tab:comp-seuils}
+\small
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}lcXcc@{}}
+\toprule
+\textbf{Seuil} & \textbf{Valeur (MSE)} & \textbf{Rôle} & \textbf{Recall} & \textbf{FPR} \\
+\midrule
+$\mu+\sigma$ (opérationnel) & 26{,}0959 & Sensibilité élevée, filtrée en aval par la persistance & \A{} & \A{} \\
+$\mu+3\sigma$ & 63{,}91 & Référence conservatrice & \A{} & \A{} \\
+Optimal $F_1$ (calibré) & 63{,}79 & Conservé dans les métadonnées, non utilisé par la décision temps réel & \A{} & \A{} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\VERIF{Le seuil opérationnel est présenté ici à $\mu+\sigma=26{,}0959$ (choix confirmé pour ce chapitre). Une autre source du projet mentionne $63{,}9139$ ($\mu+3\sigma$) comme seuil de production. Vérifier \texttt{metadata\_modele.json} (\texttt{seuil\_1sigma\_baseline}, \texttt{seuil\_optimal\_calibre}) et \texttt{realtime\_interface.py}, puis aligner la décision runtime, l'introduction générale et le chapitre 4.}
+
+\paragraph{Vote de consensus sur les caractéristiques.} Le seuil global peut manquer une anomalie \emph{ciblée}, qui n'affecte que quelques caractéristiques et dilue son effet dans la moyenne. Pour la capturer, chaque caractéristique $f$ dispose d'un seuil individuel $P_{98}^{(f)}$ (98\textsuperscript{e} percentile de son erreur de reconstruction sur le trafic normal, stocké dans \texttt{feature\_p98\_thresholds}). Le nombre de votes est
+\begin{equation}
+V(x) \;=\; \sum_{f=1}^{16} \mathbb{1}\!\left[\,e_f(x) \ge P_{98}^{(f)}\,\right]
+\label{eq:votes}
+\end{equation}
+où $e_f(x)$ est l'erreur de reconstruction de la caractéristique $f$. La séquence est déclarée suspecte lorsque
+\begin{equation}
+\text{suspect}(x) \;=\; \big(\mathrm{MSE}(x) \ge \tau_{\text{global}}\big)\;\lor\;\big(V(x) \ge 4\big)
+\label{eq:orgate}
+\end{equation}
+Le seuil global détecte ainsi les anomalies \emph{diffuses}, le vote de consensus les anomalies \emph{ciblées}.
+
+\FIG{fig:histo-mse}{Distribution du MSE (trafic normal vs attaque) avec le seuil $\mu+\sigma$}{Diagramme}{Histogramme superposé (échelle log si nécessaire) : MSE du trafic normal et du trafic d'attaque, lignes verticales à 26,0959 et 63,91. À tracer depuis \texttt{calibrate\_threshold\_16f.py}.}
+
+\subsubsection{Pré-filtres anti-DDoS et limitation de débit}
+
+Avant l'inférence, un pré-filtre analyse les volumes de paquets pour délester le moteur d'IA lors d'une inondation :
+\begin{itemize}
+  \item le \textbf{bouclier anti-DDoS volumétrique} s'active lorsque le nombre global de paquets dépasse \num{300} par fenêtre de \SI{2}{\second} et publie alors un événement \texttt{ENABLE\_DDOS\_SHIELD} ;
+  \item la \textbf{limitation de débit par IP} signale toute adresse source dépassant \num{80} paquets par fenêtre de \SI{2}{\second}.
+\end{itemize}
+Ces mécanismes évitent de saturer la file d'inférence lorsque le volume est, en lui-même, la signature de l'attaque.
+
+\subsubsection{Filtrage par persistance et garde-fous}
+
+Pour éliminer le bruit résiduel, chaque adresse IP source est associée à une fenêtre glissante de type \texttt{deque(maxlen=5)} qui mémorise les cinq dernières évaluations (suspect ou non). Une attaque n'est \emph{confirmée} que si au moins trois de ces cinq évaluations sont suspectes. Cette structure offre une complexité en temps constant $O(1)$ par mise à jour. Deux garde-fous complètent le dispositif : une \emph{liste blanche} d'actifs critiques qui ne sont jamais confirmés comme sources d'attaque, et un \emph{cooldown} de \SI{300}{\second} qui empêche de republier un blocage pour une IP déjà traitée. La confirmation publie l'événement \texttt{AUTO\_BLOCK\_IP} à destination de la couche de réponse (Release~2).
+
+\begin{algorithm}[H]
+\DontPrintSemicolon
+\SetAlgoLined
+\caption{Décision temps réel avec filtrage par persistance}
+\label{alg:persistance}
+\KwIn{Vecteur $x_t$ reçu de \texttt{network-features}, IP source $ip$, seuil $\tau_{\text{global}}$, seuils $P_{98}^{(f)}$}
+\KwOut{Événement publié ou aucun}
+Ajouter $x_t$ à la fenêtre de séquence ; \lIf{fenêtre $<10$ pas}{\Return}\;
+\If{$ip \in$ liste blanche}{\Return\;}
+\If{pré-filtre volumétrique déclenché}{publier \texttt{ENABLE\_DDOS\_SHIELD} ; \Return\;}
+$x \leftarrow$ normaliser(séquence) ; $\hat{x} \leftarrow$ décodeur$(z_{\text{mean}}(x))$\;
+calculer $\mathrm{MSE}(x)$ et $V(x)$\;
+$s \leftarrow \big(\mathrm{MSE}(x)\ge\tau_{\text{global}}\big)\lor\big(V(x)\ge 4\big)$\;
+$\mathrm{deque}[ip].\text{append}(s)$ \tcp*{maxlen = 5}
+\If{$\sum \mathrm{deque}[ip] \ge 3$ \textbf{et} $ip$ hors cooldown}{
+  publier \texttt{ANOMALY\_DETECTED} et \texttt{AUTO\_BLOCK\_IP} ; démarrer le cooldown de \SI{300}{\second}\;
+}
+\end{algorithm}
+
+\FIG{fig:etat-persistance}{Machine à états du filtrage par persistance (Normal $\rightarrow$ Suspect $\rightarrow$ Confirmé $\rightarrow$ Cooldown)}{Diagramme}{Diagramme d'états : Surveillé $\rightarrow$ (3/5 suspects) $\rightarrow$ Confirmé $\rightarrow$ Cooldown 300 s $\rightarrow$ Surveillé ; branche Liste blanche et branche Bouclier DDoS.}
+
+\subsubsection{Diagrammes de séquence et de classes}
+
+\FIG{fig:seq-s2}{Diagramme de séquence de l'inférence temps réel}{Diagramme}{Séquence : Kafka(network-features) $\rightarrow$ realtime\_interface (buffer, scaler) $\rightarrow$ Modèle LSTM-VAE (MSE, votes) $\rightarrow$ Persistance (deque) $\rightarrow$ Kafka (événement d'anomalie) $\rightarrow$ SOAR.}
+
+\FIG{fig:classes-s2}{Diagramme de classes du moteur d'inférence}{Diagramme}{Classes : RealtimeInterface, LstmVaeModel (CoucheEchantillonnage, CoucheVAELoss), Scaler, PersistenceFilter (deque), RateLimiter, DdosShield, Whitelist, KafkaConsumer/Producer.}
+
+\subsection{Réalisation}
+
+\subsubsection{Entraînement et artefacts du modèle}
+
+L'entraînement, réalisé avec TensorFlow/Keras, produit trois artefacts déployés dans \texttt{modele\_deep\_lstm\_vae\_16features/} : le modèle (\texttt{deep\_lstm\_vae\_16f.keras}), le \emph{scaler} (\texttt{global\_scaler\_16f.pkl}) et les métadonnées (\texttt{metadata\_modele.json}) qui contiennent notamment les statistiques de validation, le seuil global et les seuils $P_{98}$. Les listes de caractéristiques sont dans \texttt{selected\_features\_global.json}. Le jeu de données de référence est CIC-IDS-2017.
+
+\FIG{fig:courbes-entrainement}{Courbes de perte d'entraînement et de validation (arrêt précoce)}{Diagramme}{Courbes loss / val\_loss par époque avec l'arrêt anticipé (\emph{early stopping}). À exporter depuis le notebook ou le journal d'entraînement.}
+
+\begin{lstlisting}[style=ngidps, caption={Extrait de \texttt{metadata\_modele.json}}, label={lst:metadata}]
+{
+  "architecture": "LSTM-VAE (64-32-16-32-64)",
+  "taille_fenetre": 10,
+  "nb_features": 16,
+  "mu_validation": 7.18690824508667,
+  "sigma_validation": 18.90900230407715,
+  "seuil_1sigma_baseline": 26.0959,
+  "seuil_optimal_calibre": 63.78517150878906,
+  "feature_p98_thresholds": { ... }
+}
+\end{lstlisting}
+\A{Vérifier ces valeurs contre le fichier réel et compléter \texttt{feature\_p98\_thresholds}.}
+
+\subsubsection{Inférence temps réel}
+
+Le script \texttt{realtime\_interface.py} consomme \texttt{network-features}, maintient la séquence glissante de 10 pas par IP, applique le scaler, évalue le MSE et le vote, puis délègue la décision au filtre de persistance. Une optimisation notable concerne la performance : l'appel direct à \texttt{model.predict()} coûtait de l'ordre de \SIrange{57}{62}{\milli\second} par séquence ; l'utilisation d'un chemin compilé (\texttt{tf.function}) associé à un \emph{warm-up} au démarrage a ramené le coût de l'inférence à environ \SI{1.2}{\milli\second}, très en deçà du SLA de \SI{15}{\milli\second}.
+
+\VERIF{Les sources donnent deux valeurs pour la latence d'inférence : $\approx$\SI{1.245}{\milli\second} (mesure du chemin \texttt{tf.function}) et \SIrange{2.2}{4.3}{\milli\second} (plan Scrum, inférence déterministe $z_{\text{mean}}$). Refaire une mesure unique sur \texttt{vm-ml}, préciser ce qu'elle englobe (modèle seul ou boucle complète avec prétraitement), et harmoniser le texte ci-dessus.}
+
+\begin{lstlisting}[style=ngidps, caption={Extrait de \texttt{realtime\_interface.py} : décision OR-Gate et filtre de persistance}, label={lst:realtime}]
+# À COMPLÉTER : extrait réel (chargement du modèle, tf.function,
+# calcul MSE + votes, deque(maxlen=5), cooldown, publication Kafka)
+\end{lstlisting}
+
+\FIG{fig:realtime-console}{Console de \texttt{realtime\_interface.py} : scores MSE, votes et confirmation d'anomalie}{Capture}{Capture du terminal sur vm-ml montrant le traitement de séquences et un événement ANOMALY\_DETECTED / AUTO\_BLOCK\_IP.}
+
+\FIG{fig:kafka-anomaly}{Événement d'anomalie publié sur Kafka}{Capture}{Capture d'un message JSON d'événement (type, IP source, MSE, votes, horodatage).}
+
+\subsection{Validation}
+
+\subsubsection{Protocole expérimental}
+
+L'évaluation utilise le jeu de séquences \texttt{global\_mixed\_test\_16f.csv} (plus d'un million de séquences mêlant trafic normal et attaques issus de CIC-IDS-2017). Le modèle n'est entraîné que sur du trafic normal ; les attaques ne servent qu'à l'évaluation. Les métriques retenues sont le \emph{recall}, le taux de faux positifs (FPR), la \emph{précision} et le score $F_1$ :
+\begin{equation}
+\text{Recall}=\frac{TP}{TP+FN},\quad \text{FPR}=\frac{FP}{FP+TN},\quad \text{Précision}=\frac{TP}{TP+FP},\quad F_1=\frac{2\cdot \text{Préc.}\cdot \text{Recall}}{\text{Préc.}+\text{Recall}}
+\label{eq:metriques}
+\end{equation}
+
+\subsubsection{Résultats}
+
+\begin{table}[H]
+\centering
+\caption{Performances du modèle LSTM-VAE 16 caractéristiques}
+\label{tab:resultats-modele}
+\small
+\begin{tabular}{@{}lcl@{}}
+\toprule
+\textbf{Métrique} & \textbf{Valeur} & \textbf{Interprétation} \\
+\midrule
+Recall & \SI{44.70}{\percent} & Part des attaques détectées par le seul module ML \\
+FPR & \SI{0.74}{\percent} & Très faible bruit sur trafic normal \\
+Précision & \SI{98.67}{\percent} & Confiance élevée lorsqu'une alerte est émise \\
+Score $F_1$ & 0{,}6153 & Compromis précision/recall \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\VERIF{Confirmer à quel seuil opérationnel (26,0959 avec vote $\ge$4, ou autre) ces quatre métriques ont été mesurées, et sur quel jeu exact. Si elles ont été obtenues avec un seuil différent, ajouter une deuxième ligne et adapter la discussion.}
+
+Le \emph{recall} du module ML pris isolément est volontairement présenté avec son contexte : NG-IDPS repose sur une détection \emph{hybride} où Suricata couvre l'essentiel des attaques connues par signature, et où le LSTM-VAE est positionné sur les comportements inconnus (zero-day) et anormaux, pour lesquels une haute précision est plus précieuse qu'un recall élevé. La complémentarité des deux couches, et non le recall du seul module ML, est la mesure pertinente de couverture.
+
+\FIG{fig:matrice-confusion}{Matrice de confusion sur \texttt{global\_mixed\_test\_16f.csv}}{Diagramme}{Matrice de confusion 2$\times$2 (TP, FP, FN, TN) à partir de \texttt{evaluate\_attacks.py}.}
+
+\FIG{fig:roc-pr}{Courbes ROC et précision--recall du LSTM-VAE}{Diagramme}{Courbes ROC (AUC) et PR, avec le point de fonctionnement retenu.}
+
+\subsubsection{Robustesse aux faux positifs}
+
+Le comportement en régime normal a été contrôlé sur du trafic bénin de la journée du mardi de CIC-IDS-2017 : le taux de faux positifs inter-jours reste de l'ordre de \SIrange{1.9}{2.0}{\percent}. Un cas particulier a été analysé : l'adresse de la passerelle (\texttt{192.168.56.1}) présente un taux de fausses alertes plus élevé ($\approx$\SI{14.5}{\percent}), dont l'origine a été tracée jusqu'au trafic de maintien de session SSH (\emph{keep-alive}), absent du corpus d'entraînement. Ce cas illustre le rôle de la liste blanche des actifs d'infrastructure, complétée en aval par la fenêtre de persistance et le \emph{cooldown}, qui empêchent ces écarts isolés de se traduire par un blocage.
+
+\FIG{fig:fp-analyse}{Analyse des faux positifs par adresse IP source}{Diagramme}{Diagramme à barres du taux de FP par IP (dont 192.168.56.1) avec et sans filtre de persistance / liste blanche.}
+
+\subsubsection{Test de bout en bout}
+
+\begin{table}[H]
+\centering
+\caption{Scénarios de validation du Sprint~2}
+\label{tab:validation-s2}
+\small
+\begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}Xc@{}}
+\toprule
+\textbf{ID} & \textbf{Scénario} & \textbf{Résultat attendu} & \textbf{Résultat observé} & \textbf{Statut} \\
+\midrule
+T2.1 & Trafic bénin continu & Aucun blocage confirmé & \A{observé} & \A{OK/KO} \\
+T2.2 & Scan de ports depuis la machine d'attaque (Kali) & \texttt{ANOMALY\_DETECTED} puis \texttt{AUTO\_BLOCK\_IP} après persistance 3/5 & \A{observé} & \A{OK/KO} \\
+T2.3 & Inondation volumétrique & \texttt{ENABLE\_DDOS\_SHIELD} publié ; moteur non saturé & \A{observé} & \A{OK/KO} \\
+T2.4 & IP en liste blanche & Aucune confirmation & \A{observé} & \A{OK/KO} \\
+T2.5 & Second déclenchement dans le \emph{cooldown} & Aucune republication avant \SI{300}{\second} & \A{observé} & \A{OK/KO} \\
+T2.6 & Latence d'inférence & Inférieure à \SI{15}{\milli\second} & \A{valeur mesurée} & \A{OK/KO} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\FIG{fig:attaque-demo}{Scénario d'attaque depuis la machine Kali et détection correspondante}{Capture}{Capture composite : commande d'attaque (nmap/hping3) côté Kali, et événement d'anomalie confirmé côté vm-ml.}
+
+\subsection{Conclusion du sprint~2}
+
+Le sprint~2 livre un moteur d'inférence temps réel dont la décision combine un seuil global sensible ($\mu+\sigma$), un vote de consensus sur les caractéristiques, des pré-filtres volumétriques et un filtrage par persistance. Ces mécanismes transforment un score d'anomalie bruité en événements fiables (\texttt{ANOMALY\_DETECTED}, \texttt{AUTO\_BLOCK\_IP}, \texttt{ENABLE\_DDOS\_SHIELD}), avec une précision de l'ordre de \SI{98.7}{\percent} et un taux de faux positifs de \SI{0.74}{\percent}, dans un temps d'inférence conforme au SLA.
+
+%% ==========================================================================
+\section*{Conclusion du chapitre}
+\addcontentsline{toc}{section}{Conclusion du chapitre}
+%% ==========================================================================
+
+La Release~1 établit la couche de détection de NG-IDPS. Le sprint~1 assure une ingestion à double voie qui sépare la détection temps réel de l'investigation forensic et ramène la latence de bout en bout à quelques secondes ; le sprint~2 apporte un moteur stochastique dont la fiabilité repose moins sur un seuil unique que sur la conjonction d'un seuil global, d'un vote sur les caractéristiques et d'une confirmation par persistance. Les événements produits constituent l'entrée de la Release~2, présentée au chapitre~\ref{chap:release2}, qui traite la prévention, l'orchestration SOAR et l'analyse cognitive.
+
+\begin{table}[H]
+\centering
+\caption{Bilan de la Release~1}
+\label{tab:bilan-r1}
+\small
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}XX@{}}
+\toprule
+\textbf{Objectif} & \textbf{Résultat} \\
+\midrule
+Ingestion double voie opérationnelle & Sonde Suricata, bus Kafka, dashboard Kibana \\
+Latence de bout en bout de quelques secondes & \SIrange{3}{4}{\second} (contre $\approx$\SI{53}{\second} avant réglage) \\
+Inférence sous le SLA de \SI{15}{\milli\second} & \A{valeur mesurée finale} \\
+Faible bruit de détection & FPR \SI{0.74}{\percent}, précision \SI{98.67}{\percent} \\
+\bottomrule
+\end{tabularx}
+\end{table}
