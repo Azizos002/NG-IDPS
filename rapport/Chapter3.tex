@@ -116,10 +116,11 @@ En matière de bonne gouvernance système, nous avons établi une contrainte str
 
 \begin{figure}[H]
 \centering
-% [PLACEHOLDER FIGURE : suricata_yaml_config.png]
+    \includegraphics[width=0.75\textwidth]{../screenshots/s1-suricataConfig.png}
 \caption{Extrait de configuration \texttt{suricata.yaml}}
 \label{fig:suricata_yaml_config}
 \end{figure}
+
 
 \subsection{Validation de la Télémétrie Sérialisée}
 L'intégrité de la sérialisation des métadonnées applicatives, ainsi que la levée immédiate des alertes déterministes, sont validées par l'inspection du journal de sortie. L'objectif principal de l'activation d'\textit{EVE JSON} est de générer un format de données pivot, auto-descriptif et nativement ingérable par Apache Kafka, contournant les limitations syntaxiques des anciens fichiers de log plat (\texttt{fast.log}).
@@ -128,7 +129,7 @@ L'extrait de log présenté par la figure \ref{fig:validation_eve_json} confirme
 
 \begin{figure}[H]
 \centering
-% [PLACEHOLDER FIGURE : eve_json_validation.png]
+    \includegraphics[width=0.6\textwidth]{../screenshots/s1-eveLogs.png}
 \caption{Validation de la génération des logs de détection}
 \label{fig:validation_eve_json}
 \end{figure}
@@ -245,7 +246,7 @@ Afin de valider l'intégrité de notre pipeline, nous avons vérifié le cœur d
 
 \begin{figure}[H]
 \centering
-% [PLACEHOLDER FIGURE : consumerSUCCESS-verif2.png]
+    \includegraphics[width=0.9\textwidth]{../screenshots/s1-kafka_consumer.png}
 \caption{Validation de la communication asynchrone inter-nœuds via Apache Kafka}
 \label{fig:kafka_consumer_test}
 \end{figure}
@@ -255,17 +256,17 @@ L'opération d'ETL a été validée en injectant une adresse IP publique de test
 
 \begin{figure}[H]
 \centering
-% [PLACEHOLDER FIGURE : elastic-verif-geoipTest.png]
+    \includegraphics[width=0.8\textwidth]{../screenshots/verifGeoIP-2.png}
 \caption{Validation de l'enrichissement GeoIP par Logstash}
 \label{fig:geoip_validation}
 \end{figure}
 
 \subsubsection{Preuve de Scalabilité du Dashboard (Kibana)}
-Pour répondre aux exigences de supervision opérationnelle d'un SOC, les métriques sérialisées ont été agrégées dans un tableau de bord global de \textit{Data Visualization}. La figure \ref{fig:dashboard_SOC} démontre la capacité de l'architecture de streaming à supporter le volume massif du \textit{Big Data} : près de 1,4 million d'événements ont été ingérés, catégorisés par criticité, et rendus interrogeables en quelques millisecondes.
+Pour répondre aux exigences de supervision opérationnelle d'un SOC, les métriques sérialisées ont été agrégées dans un tableau de bord global de \textit{Data Visualization}. La figure \ref{fig:dashboard_SOC} démontre la capacité de l'architecture de streaming à supporter le volume massif du \textit{Big Data} : près de 16,5 million d'événements ont été ingérés, catégorisés par criticité, et rendus interrogeables en quelques millisecondes.
 
 \begin{figure}[H]
 \centering
-% [PLACEHOLDER FIGURE : dashboard-elastic.png]
+    \includegraphics[width=0.8\textwidth]{../screenshots/s2-dashboard-soc.png}
 \caption{Tableau de bord SOC global}
 \label{fig:dashboard_SOC}
 \end{figure}
@@ -389,10 +390,11 @@ Recall -- PortScan & $\approx$ 0\,\% & $\approx$ 0\,\% (inchangé, cf. \S\ref{su
 
 \begin{figure}[H]
 \centering
-% [PLACEHOLDER FIGURE : matrice_fscore_par_type.png]
+    \includegraphics[width=0.7\textwidth]{../screenshots/matrice_fscore_par_type_2.png}
 \caption{Matrice des scores ANOVA par type d'attaque ayant motivé la sélection équilibrée}
 \label{fig:matrice_fscore}
 \end{figure}
+
 
 \subsubsection{Mise à l'Échelle et Normalisation (Scaling)}
 Pour éviter la saturation des gradients (\textit{Vanishing/Exploding Gradients}) et la divergence de la fonction de perte durant la rétropropagation, les caractéristiques du dataset ont nécessité une mise à l'échelle stricte. L'utilisation d'un \texttt{StandardScaler} a été écartée au profit d'un \textbf{\texttt{MinMaxScaler}} (bornage strict sur l'intervalle $[0,1]$), ajusté \textbf{uniquement} sur le sous-ensemble d'entraînement bénin pour prévenir toute fuite d'information (\textit{data leakage}) entre les distributions d'entraînement et de test. Les cellules LSTM utilisant des fonctions d'activation non linéaires telles que la Sigmoïde ($\sigma(x) \in [0,1]$), l'injection de tenseurs strictement normalisés sur les mêmes asymptotes mathématiques accélère considérablement la convergence des poids synaptiques du réseau.
@@ -432,11 +434,11 @@ L'entraînement a été conduit avec l'optimiseur \textbf{Adam}, un \texttt{batc
 
 \begin{figure}[H]
 \centering
-% [PLACEHOLDER FIGURE : trainLSTMVAE.png]
-% Capture du terminal affichant les temps par epoch et les métriques de loss.
-\caption{Logs d'exécution MLOps de l'entraînement}
+\includegraphics[width=0.9\textwidth]{../screenshots/train_logs_2.png}
+\caption{Logs d'exécution de l'entraînement du modèle LSTM-VAE}
 \label{fig:logs_execution_ia}
 \end{figure}
+
 
 \subsection{Réalisation : Calibration Rigoureuse du Seuil de Décision}
 \label{subsec:threshold_scaling}
@@ -482,8 +484,8 @@ Le seuil $1,5\sigma$ ($\tau = 68,12$) a été retenu comme point de fonctionneme
 
 \begin{figure}[H]
 \centering
-% [PLACEHOLDER FIGURE : courbes_roc_pr.png]
-\caption{Courbes ROC et Précision-Rappel sur le jeu de calibration (AUC-ROC=0,79 ; AUC-PR=0,84)}
+\includegraphics[width=0.7\textwidth]{../screenshots/courbes_roc_pr.png}
+\caption{Courbes ROC et Précision-Rappel sur le jeu de calibration}
 \label{fig:courbes_roc_pr}
 \end{figure}
 
@@ -521,7 +523,7 @@ Ce résultat, bien que le rappel global agrégé soit quasi identique entre les 
 
 \begin{figure}[H]
 \centering
-% [PLACEHOLDER FIGURE : comparaison_isolation_forest_output.png]
+\includegraphics[width=0.8\textwidth]{../screenshots/isolation_forest_comparaison.png}
 \caption{Sortie du script d'évaluation comparative Isolation Forest (mêmes features/train/test que le LSTM-VAE)}
 \label{fig:comparaison_if}
 \end{figure}
@@ -596,60 +598,50 @@ Trois classes d'attaques ont été menées en conditions réelles depuis une mac
 \endlastfoot
 
 Nikto (scan web) & Détecté & Détecté (5 votes, MSE $\approx 200$) & Détection croisée, blocage en $<3$s \\ \hline
-Nmap -sS (scan ports) & Non détecté puis détecté & Non détecté (MSE $\approx 41$, sous seuil) & Règle locale \texttt{local.rules} non chargée (bug de configuration identifié et corrigé) \\ \hline
-Hydra (brute-force SSH) & Non détecté & Détecté (5 votes, MSE $\approx 182$, blocage en 2 évaluations) & Aucune règle ET comportementale de brute-force SSH applicable en réseau privé \\ \hline
+Nmap -sS (scan ports) & Détecté & Détecté (MSE $\approx 104$) & Détection croisée, blocage en $<5$s \\ \hline
+Hydra (brute-force SSH) & Non détecté & Détecté (7 votes, MSE $\approx 225$, blocage en 2 évaluations) & Aucune règle ET comportementale de brute-force SSH applicable en réseau privé \\ \hline
 
 \end{xltabular}
 \endgroup
 
+La figure~\ref{fig:logs_nikto} illustre une détection à large spectre. Côté Suricata, des alertes multiples sont levées dès 15:58:15 (inondation HTTP, sonde Spring Boot, anomalie de protocole, balayage SYN, accès administrateur ColdFusion). Côté modèle, sept caractéristiques sont en violation, dont des tailles de paquet, pour une erreur de reconstruction d'environ 200 face à un seuil de 68,12 ; la persistance (trois évaluations anormales sur les cinq dernières) est atteinte et la décision d'isolation émise à 15:58:23,341.
 
 \begin{figure}[H]
 \centering
-% [PLACEHOLDER FIGURE : logs_hydra_detection.png]
-\caption{Logs de détection et d'auto-blocage lors de l'attaque Hydra (brute-force SSH)}
-\label{fig:logs_hydra}
-\end{figure}
-
-\begin{figure}[H]
-\centering
-% [PLACEHOLDER FIGURE : logs_nikto_detection.png]
+\includegraphics[width=0.9\textwidth]{../screenshots/nikto.png}
 \caption{Logs de détection croisée Suricata/LSTM-VAE lors de l'attaque Nikto}
 \label{fig:logs_nikto}
 \end{figure}
 
-Le cas Nmap a révélé un défaut de configuration réel : le fichier \texttt{local.rules}, contenant une règle de détection de scan SYN par seuil (\texttt{threshold:type both, track by\_src, count 10, seconds 5}), n'était pas référencé dans la directive \texttt{rule-files} de \texttt{suricata.yaml}. Une fois la règle correctement chargée et le fichier corrigé (suppression d'une signature dupliquée), l'attaque Nmap a été détectée par les deux couches simultanément lors d'un test de reproduction.
 
-Le cas Hydra constitue la démonstration la plus directe de la complémentarité architecturale du système : l'inspection du jeu de règles actif confirme l'\textbf{absence de toute règle comportementale} de détection du brute-force SSH par comptage de tentatives échouées -- la seule couverture théorique repose sur des listes de réputation d'IP publiques, structurellement inapplicables à un réseau privé de laboratoire. Le LSTM-VAE, lui, détecte et bloque cette attaque sans dépendre d'aucune signature préexistante.
-
-\subsubsection{Diagnostic et Correction des Faux Positifs d'Infrastructure}
-Une investigation systématique a été menée suite à l'observation d'alertes répétées sur les adresses IP internes du pipeline lui-même (\texttt{vm-edge}, \texttt{vm-ml}). Par élimination successive (arrêt contrôlé du service de télémétrie \texttt{agent\_monitor.py}, inspection \texttt{tcpdump} du trafic réel), la cause racine a été isolée : le producteur Kafka du collecteur \texttt{edge\_collector.py} lui-même génère un trafic statistiquement proche d'une signature de force brute (connexions établies, drapeaux SYN/ACK/PSH répétés à intervalle régulier) -- exactement le pattern que les caractéristiques équilibrées ont été sélectionnées pour détecter (\S\ref{subsec:feature_engineering}).
-
-Un mécanisme de neutralisation sélective a été implémenté et validé expérimentalement : pour les adresses IP de la liste blanche uniquement, les quatre caractéristiques de drapeaux TCP responsables du déclenchement sont neutralisées \textbf{avant} l'inférence. Ce mécanisme a été validé sans régression : le trafic interne cesse de déclencher des votes (MSE ramené de 97--182 à 12--13) tandis qu'une attaque Hydra réelle reste détectée et bloquée avec la même latence qu'auparavant (moins de 3 secondes).
+Le cas Nmap (figure~\ref{fig:logs_portscan}), l'attaque a été détectée par les deux couches : alerte Suricata à 15:38:36, puis décision d'isolation du modèle à 15:38:39,635, quelque millisecondes après sa première évaluation anormale. Deux caractéristiques seulement sont en violation (\texttt{SYN Flag Count} et \texttt{ACK Flag Count}), aucune taille de paquet n'étant perturbée, contrairement aux cas Nikto et Hydra ; l'erreur globale de 104,4 dépasse néanmoins le seuil.
 
 \begin{figure}[H]
 \centering
-% [PLACEHOLDER FIGURE : diag_features_violation.png]
-\caption{Diagnostic par feature : caractéristiques précises déclenchant le vote sur le trafic interne}
-\label{fig:diag_features}
+\includegraphics[width=0.9\textwidth]{../screenshots/port-scan_2.png}
+\caption{Logs de détection croisée Suricata/LSTM-VAE lors de l'attaque Port Scan}
+\label{fig:logs_portscan}
 \end{figure}
+
+Le cas Hydra (figure~\ref{fig:logs_hydra}) produit le signal le plus intense de la série : sept caractéristiques en violation, dont des tailles de paquet (\texttt{Bwd Packet Length Max}, \texttt{Min Packet Length}), une erreur de reconstruction de 224,6 et une isolation à la troisième évaluation anormale. Il constitue la démonstration la plus directe de la complémentarité architecturale du système : l'inspection du jeu de règles actif confirme l'\textbf{absence de toute règle comportementale} de détection du brute-force SSH par comptage de tentatives échouées -- la seule couverture théorique repose sur des listes de réputation d'IP publiques, structurellement inapplicables à un réseau privé de laboratoire. Le LSTM-VAE, lui, détecte et bloque cette attaque sans dépendre d'aucune signature préexistante.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{../screenshots/hydra.png}
+\caption{Logs de détection et d'auto-blocage lors de l'attaque Hydra (brute-force SSH)}
+\label{fig:logs_hydra}
+\end{figure}
+
 
 \subsubsection{Durcissement contre l'Usurpation d'Adresse : Protection ARP}
-Ce mécanisme de confiance, comme tout mécanisme fondé sur l'adresse IP source, demeure théoriquement vulnérable à l'usurpation. Une contre-mesure au niveau de la couche liaison a donc été implémentée et \textbf{testée offensivement} : une règle \texttt{arptables} associant strictement chaque adresse IP de confiance à sa véritable adresse MAC a été déployée sur le nœud d'inférence, rendant caduque toute usurpation ARP provenant d'un segment réseau tiers.
+Ce mécanisme de confiance, comme tout mécanisme fondé sur l'adresse IP source, demeure théoriquement vulnérable à l'usurpation. Une contre-mesure au niveau de la couche liaison a donc été implémentée et \textbf{testée offensivement} : sur le nœud d'inférence, une règle \texttt{arptables} rejette toute trame ARP dont l'adresse IP source est celle de \texttt{vm-edge} et dont l'adresse MAC source diffère de la sienne, rendant caduque l'usurpation de cette adresse depuis un segment réseau tiers. La règle est rechargée à chaque démarrage par un service \texttt{systemd} dédié, et sa présence a été vérifiée après redémarrage de la machine virtuelle.
 
-Cette protection a été validée par une attaque réelle d'empoisonnement ARP (\texttt{arpspoof}) menée depuis Kali Linux contre le nœud d'inférence, ciblant l'adresse whitelistée de \texttt{vm-edge}. Pendant toute la durée de l'attaque, la table ARP du nœud protégé a conservé l'adresse MAC légitime, et le compteur de paquets rejetés par la règle \texttt{arptables} a progressé en temps réel (de 20 à 22 paquets interceptés durant l'observation), confirmant l'interception active des trames falsifiées avant qu'elles n'atteignent la table de résolution ARP du système.
-
-\begin{figure}[H]
-\centering
-% [PLACEHOLDER FIGURE : arpspoof_test_kali.png]
-\caption{Attaque d'empoisonnement ARP (arpspoof) menée depuis Kali Linux contre le nœud d'inférence}
-\label{fig:arpspoof_kali}
-\end{figure}
+Cette protection a été validée par une attaque réelle d'empoisonnement ARP (\texttt{arpspoof}) menée depuis Kali Linux contre le nœud d'inférence, en se faisant passer pour \texttt{vm-edge} (figure~\ref{fig:arp_spoofing_test}). En haut, la machine d'attaque émet en boucle des réponses ARP associant l'adresse de \texttt{vm-edge} à sa propre adresse MAC. En bas, la table de voisinage du nœud protégé, relevée pendant l'attaque, affiche toujours l'adresse MAC légitime de \texttt{vm-edge}, et le compteur de la règle progresse sur trois relevés successifs : 20, 22 puis 39 paquets rejetés (920, 1\,012 puis 1\,794 octets), tandis que la politique par défaut continue d'accepter le reste du trafic ARP (99 puis 114 paquets). Les trames falsifiées sont ainsi interceptées avant d'atteindre la table de résolution ARP du système.
 
 \begin{figure}[H]
 \centering
-% [PLACEHOLDER FIGURE : arptables_compteurs.png]
-\caption{Compteurs \texttt{arptables} confirmant l'interception des paquets ARP falsifiés (\texttt{arptables -L -v})}
-\label{fig:arptables_compteurs}
+\includegraphics[width=0.9\textwidth]{../screenshots/test-ARPspoofing.png}
+\caption{Test d'empoisonnement ARP}
+\label{fig:arp_spoofing_test}
 \end{figure}
 
 \subsection{Validation : Convergence, Latence et Faux Positifs en Conditions Opérationnelles}
@@ -658,7 +650,7 @@ L'entraînement du modèle s'est stabilisé grâce à l'\texttt{EarlyStopping}, 
 
 \begin{figure}[H]
 \centering
-% [PLACEHOLDER FIGURE : convergence_lstmvae.png]
+\includegraphics[width=0.8\textwidth]{../screenshots/convergence_lstmvae.png}
 \caption{Courbes de convergence algorithmique du modèle LSTM-VAE avec Early Stopping}
 \label{fig:convergence_lstmvae}
 \end{figure}
@@ -667,7 +659,7 @@ Les journaux d'inférence en production (Figure \ref{fig:realtime_logs}) certifi
 
 \begin{figure}[H]
 \centering
-% [PLACEHOLDER FIGURE : realtime_logs.png]
+\includegraphics[width=0.8\textwidth]{../screenshots/realtime_interface_logs.png}
 \caption{Traces de corrélation temps réel (MSE, votes, persistance) validant l'étouffement du bruit résiduel}
 \label{fig:realtime_logs}
 \end{figure}

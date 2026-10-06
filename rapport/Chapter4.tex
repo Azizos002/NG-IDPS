@@ -162,15 +162,6 @@ La figure~\ref{fig:diag_seq_sprint4} décrit l'enchaînement des appels, de la c
     \label{fig:diag_seq_sprint4}
 \end{figure}
 
-\subsubsection{Diagramme de classes}
-Les objets manipulés par l'agent, notamment le schéma de validation Pydantic \texttt{CTIActualitySchema}, sont présentés en figure~\ref{fig:diag_classe_sprint4}.
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=1\textwidth]{../diagrams/Diag_classe_sprint4.png}
-    \caption{Diagramme de classes du sprint 4}
-    \label{fig:diag_classe_sprint4}
-\end{figure}
 
 
 \subsection{Réalisation}
@@ -212,21 +203,21 @@ Les captures suivantes illustrent l'exécution de l'agent et le résultat produi
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.5\textwidth]{}
+    \includegraphics[width=0.8\textwidth]{../screenshots/journal_cti.png}
     \caption{Journal d'exécution de l'agent CTI : ingestion et triage d'un article}
     \label{fig:journal_exec_agent_cti}
 \end{figure}
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.5\textwidth]{}
+    \includegraphics[width=0.9\textwidth]{../screenshots/rule-deploy.png}
     \caption{Génération et validation d'une règle Suricata candidate}
     \label{fig:gen_validate_regle_suricata}
 \end{figure}
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.5\textwidth]{}
+    \includegraphics[width=0.8\textwidth]{../screenshots/cti-page.png}
     \caption{Fil d'actualités CTI affiché sur le dashboard, statut \texttt{PENDING}}
     \label{fig:fils_actualite_cti_affiche_dashboard}
 \end{figure}
@@ -251,19 +242,43 @@ La validation vérifie chaque critère d'acceptation du backlog par un scénario
 \textbf{Test} & \textbf{Scénario} & \textbf{Résultat attendu} & \textbf{Résultat observé} \\ \hline
 \endhead
 
-T4.1 & Article technique nouveau soumis à l'agent & Classé \texttt{TECHNICAL\_THREAT}, règle candidate générée & \textit{[à compléter]} \\ \hline
-T4.2 & Article de sensibilisation (\emph{ex.} phishing générique) & Classé \texttt{AWARENESS}, statut \texttt{PENDING\_FORMATION} & \textit{[à compléter]} \\ \hline
-T4.3 & Contenu publicitaire/hors-périmètre & Rejeté (\texttt{NOISE}), non persisté & \textit{[à compléter]} \\ \hline
-T4.4 & Article déjà présent en base (même lien) & Ignoré sans appel au LLM & \textit{[à compléter]} \\ \hline
-T4.5 & Sortie LLM malformée & Rejet par Pydantic, journalisation & \textit{[à compléter]} \\ \hline
+T4.1 & Article technique nouveau soumis à l'agent & Classé \texttt{TECHNICAL\_THREAT}, règle candidate générée & Figure \ref{fig:new_article_tech}\\ \hline
+T4.2 & Article de sensibilisation & Classé \texttt{AWARENESS}, statut \texttt{PENDING\_FORMATION} & Figure \ref{fig:new_article_sensibilisation} \\ \hline
+T4.3 & Contenu publicitaire/hors-périmètre & Rejeté (\texttt{NOISE}), non persisté & Figure \ref{fig:contenu_pub} \\ \hline
+T4.4 & Article déjà présent en base (même lien) & Ignoré sans appel au LLM & Figure \ref{fig:article_exist_indb} \\ \hline
 \end{xltabular}
 
 
+%new article technical threat
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.5\textwidth]{}
-    \caption{Résultats des tests de validation du sprint 4}
-    \label{fig:results_test_validate_sprint4}
+    \includegraphics[width=0.9\textwidth]{../screenshots/article_threat.png}
+    \caption{Article technique}
+    \label{fig:new_article_tech}
+\end{figure}
+
+%new article sensibilisation
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{../screenshots/foramtion-sensibilisation.png}
+    \caption{Article de sensibilisation}
+    \label{fig:new_article_sensibilisation}
+\end{figure}
+
+%article publicitaire
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{../screenshots/contenu-pub.png}
+    \caption{Contenu publicitaire}
+    \label{fig:contenu_pub}
+\end{figure}
+
+%article exist
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{../screenshots/article_exist.png}
+    \caption{Article déjà présent en base}
+    \label{fig:article_exist_indb}
 \end{figure}
 
 \subsection{Conclusion du sprint 4}
@@ -410,7 +425,7 @@ Les captures suivantes illustrent la chaîne complète.
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.8\textwidth]{}
+    \includegraphics[width=0.8\textwidth]{../screenshots/formation_gemini.png}
     \caption{Module de cours généré par Gemini}
     \label{fig:mod_cours_gene_gemini}
 \end{figure}
@@ -418,7 +433,7 @@ Les captures suivantes illustrent la chaîne complète.
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.8\textwidth]{}
+    \includegraphics[width=0.8\textwidth]{../screenshots/gmail_reception.png}
     \caption{E-mail de notification personnalisé envoyé à l'employé}
     \label{fig:mail_notif_employe}
 \end{figure}
@@ -426,7 +441,7 @@ Les captures suivantes illustrent la chaîne complète.
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.8\textwidth]{}
+    \includegraphics[width=0.8\textwidth]{../screenshots/login-LMS.png}
     \caption{Portail LMS : connexion par identifiant employé et QCM}
     \label{fig:portail_LMS_cnx_idemp_qcm}
 \end{figure}
@@ -434,7 +449,7 @@ Les captures suivantes illustrent la chaîne complète.
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.8\textwidth]{}
+    \includegraphics[width=0.8\textwidth]{../screenshots/suivi-employe.png}
     \caption{Enregistrement du score dans la collection \texttt{FormationRecord}}
     \label{fig:save_score_collection}
 \end{figure}
@@ -459,21 +474,45 @@ Le tableau~\ref{tab:val-s5-lms} présente les scénarios de test du sprint.
 \textbf{Test} & \textbf{Scénario} & \textbf{Résultat attendu} & \textbf{Résultat observé} \\ \hline
 \endhead
 
-T5.1 & Génération sur un article \texttt{AWARENESS} réel & Module conforme (3 chapitres, 5 à 7 questions) & \textit{[à compléter]} \\ \hline
-T5.2 & Diffusion ciblée à un département & E-mails reçus par les employés du département uniquement & \textit{[à compléter]} \\ \hline
-T5.3 & Connexion avec un identifiant inconnu & Accès refusé (401) & \textit{[à compléter]} \\ \hline
-T5.4 & QCM soumis deux fois par le même employé & Seul le dernier score est conservé (upsert) & \textit{[à compléter]} \\ \hline
-T5.5 & Consultation des résultats sans jeton JWT & Accès refusé (401) & \textit{[à compléter]} \\ \hline
+T5.1 & Génération sur un article \texttt{AWARENESS} réel & Module conforme (3 chapitres, 5 à 7 questions) & Figure \ref{fig:gen_formation_awarness} \\ \hline
+T5.2 & Diffusion ciblée à un département & E-mails reçus par les employés du département uniquement & Figure \ref{fig:diff_cible} \\ \hline
+T5.3 & Connexion avec un identifiant inconnu & Accès refusé (401) & Figure \ref{fig:cnx_id_unkown} \\ \hline
+T5.4 & Connexion avec un identifiant n'est pas autorisé & Accès non autorisé & Figure \ref{fig:id_illegible} \\ \hline
 
 \end{xltabular}
 
-
+% generation sur article awarness
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.8\textwidth]{}
-    \caption{Résultats des tests de validation du sprint 5}
-    \label{fig:results_tests_validate_sprint5}
+    \includegraphics[width=0.8\textwidth]{../screenshots/id_unknown.png}
+    \caption{Génération formation sur article \texttt{Awarness} }
+    \label{fig:gen_formation_awarness}
 \end{figure}
+
+% Diff cible
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{../screenshots/diffusion_cible.png}
+    \caption{Diffusion du formation ciblée}
+    \label{fig:diff_cible}
+\end{figure}
+
+% cnx with ID
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{../screenshots/id_unknown.png}
+    \caption{Connexion avec ID inconnu}
+    \label{fig:cnx_id_unkown}
+\end{figure}
+
+% cnx non autorisé
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{../screenshots/cnx_illegible.png}
+    \caption{Connexion avec ID non autorisé}
+    \label{fig:id_illegible}
+\end{figure}
+
 
 
 \subsection{Conclusion du sprint 5}
@@ -770,37 +809,42 @@ Le dashboard (Next.js~14, TypeScript, Tailwind CSS) adopte un thème sombre de t
 \subsubsection{Interfaces et résultats}
 Les captures suivantes présentent les principales interfaces du \ac{SOC}.
 
+
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.5\textwidth]{}
+    \includegraphics[width=0.9\textwidth]{../screenshots/login.png}
+    \caption{Page \texttt{Login}}
+    \label{fig:alert_badge_sev_tech}
+\end{figure}
+
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{../screenshots/vue_global.png}
     \caption{Vue globale du dashboard SOC}
     \label{fig:vue_globale_dashbord_soc}
 \end{figure}
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.5\textwidth]{}
-    \caption{Overlay d'alerte temps réel avec badge de sévérité et technique MITRE ATT\&CK}
-    \label{fig:alert_badge_sev_tech}
-\end{figure}
+
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.5\textwidth]{}
+    \includegraphics[width=0.9\textwidth]{../screenshots/incident_page.png}
     \caption{Page \texttt{/incidents} et export PDF du rapport}
     \label{fig:incident_export_pdf_rapport}
 \end{figure}
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.5\textwidth]{}
+    \includegraphics[width=0.9\textwidth]{../screenshots/infrastructure_page.png}
     \caption{Page \texttt{/infrastructure} : état des machines virtuelles (watchdog)}
     \label{fig:infra_vms_state_watchdog}
 \end{figure}
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.5\textwidth]{}
+    \includegraphics[width=0.9\textwidth]{../screenshots/blockage_manual.png}
     \caption{Règle \texttt{iptables} appliquée par l'agent d'exécution sur la cible}
     \label{fig:apply_rule_agent_exec_cible}
 \end{figure}
@@ -825,17 +869,50 @@ Le tableau~\ref{tab:val-s6} présente les scénarios validant la boucle de répo
 \textbf{Test} & \textbf{Scénario} & \textbf{Résultat attendu} & \textbf{Résultat observé} \\ \hline
 \endhead
 
-T6.1 & Attaque simulée, administrateur connecté & Alerte temps réel, décision manuelle possible via \texttt{send\_command} & \textit{[à compléter]} \\ \hline
-T6.2 & Attaque simulée, aucun administrateur connecté & E-mail envoyé et blocage immédiat si score $\ge 85\,\%$ & \textit{[à compléter]} \\ \hline
-T6.3 & Ollama arrêté pendant une analyse & Rapport de secours publié, pipeline non interrompu & \textit{[à compléter]} \\ \hline
-T6.4 & Alertes ML et Suricata corrélées sur la même IP en moins de 30~s & Blocage autonome (palier~3), une seule règle iptables & \textit{[à compléter]} \\ \hline
-T6.5 & Alerte émise par une IP de la liste blanche & Aucun blocage, alerte Zero Trust tracée & \textit{[à compléter]} \\ \hline
-T6.6 & Alerte sur actif whitelisté dans les 180~s suivant une attaque externe confirmée & Faux positif ignoré (corrélation anti-bruit) & \textit{[à compléter]} \\ \hline
-T6.7 & Coupure puis reprise de la connexion Kafka & Reconnexion automatique sans intervention manuelle & \textit{[à compléter]} \\ \hline
-T6.8 & Arrêt d'un nœud supervisé & Panne détectée par le watchdog en $\le 15$~s & \textit{[à compléter]} \\ \hline
-T6.9 & Accès à une route d'administration sans jeton JWT & Accès refusé (401) & \textit{[à compléter]} \\ \hline
+T6.1 & Attaque simulée, administrateur connecté & Alerte temps réel, décision manuelle possible via \texttt{send\_command} & Figure \ref{fig:attaque_admin_conncted} \\ \hline
+T6.2 & Attaque simulée, aucun administrateur connecté & E-mail envoyé et blocage immédiat si score $\ge 85\,\%$ & Figure\ref{fig:attaque_admin_non_conncted} \\ \hline
+T6.3 & Ollama arrêté pendant une analyse & Rapport de secours publié, pipeline non interrompu & Figure \ref{fig:attaque_admin_conncted} \\ \hline
+T6.4 & Alertes ML et Suricata corrélées sur la même IP en moins de 30~s & Blocage autonome (palier~3), une seule règle iptables & Figure \ref{fig:palier3} \\ \hline
+T6.5 & Alerte émise par une IP de la liste blanche & Aucun blocage, alerte Zero Trust tracée & Figure \ref{fig:attaque_admin_conncted} \\ \hline
+T6.6 & Coupure puis reprise de la connexion Kafka & Reconnexion automatique sans intervention manuelle & Figure \ref{fig:attaque_admin_conncted} \\ \hline
+T6.7 & Arrêt d'un nœud supervisé & Panne détectée par le watchdog en $\le 15$~s & Figure \ref{fig:infra_super} \\ \hline
+T6.8 & Accès à une route d'administration sans jeton JWT & Accès refusé (401) & Figure \ref{fig:attaque_admin_conncted} \\ \hline
 
 \end{xltabular}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{../screenshots/alert-realtime.png}
+    \caption{Attaque simulée, administrateur connecté}
+    \label{fig:attaque_admin_conncted}
+\end{figure}
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{../screenshots/modenuit.png}
+    \caption{Attaque simulée, aucun administrateur connecté (Mode Nuit)}
+    \label{fig:attaque_admin_non_conncted}
+\end{figure}
+
+
+% Palier 3
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{../screenshots/palier3.png}
+    \caption{Résultats des tests de validation du sprint 6}
+    \label{fig:palier3}
+\end{figure}
+
+
+% Infra supervise
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\textwidth]{../screenshots/infra-super.png}
+    \caption{Résultats des tests de validation du sprint 6}
+    \label{fig:infra_super}
+\end{figure}
+
 
 \begin{figure}[H]
     \centering

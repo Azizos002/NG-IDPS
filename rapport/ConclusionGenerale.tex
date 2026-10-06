@@ -1,0 +1,78 @@
+\chapter*{Conclusion Générale}
+% ==============================================================================
+% CONCLUSION GÉNÉRALE — NG-IDPS
+% Système Autonome de Détection et Prévention d'Intrusions Nouvelle Génération
+% Master Professionnel : Computer Engineering — Expert Réseaux, ISIMa
+% ==============================================================================
+% Comme pour l'introduction, le titre de chapitre est posé dans le fichier principal :
+% \chapter*{Conclusion Générale}
+% \addcontentsline{toc}{chapter}{Conclusion Générale}
+\label{chap:conclusion}
+
+Ce projet de fin d'études avait pour ambition de concevoir, de réaliser et de valider un système de détection et de prévention des intrusions réseau capable de fonctionner de manière autonome dans un environnement local et isolé, au profit d'organisations qui ne disposent ni d'équipes de supervision permanentes ni de plateformes commerciales intégrées. Le système NG-IDPS qui en résulte associe, au sein d'une chaîne unique, une détection par signatures, une détection comportementale non supervisée, un renseignement sur les menaces, une orchestration de la réponse et un tableau de bord de supervision, le tout reposant sur des composants libres et sur des modèles de langage auto-hébergés pour ses fonctions critiques.
+
+\section*{Bilan du travail réalisé}
+
+La phase préparatoire a permis de traduire la problématique en sept objectifs fonctionnels et cinq objectifs non fonctionnels, de planifier le travail en six sprints selon la méthodologie Scrum et de définir une architecture répartie en nœuds spécialisés : capture, apprentissage, réponse et supervision.
+
+La première \textit{Release}, consacrée à la détection, a mis en place la capture du trafic par une sonde Suricata, un pipeline à double chemin (indexation pour l'investigation, flux temps réel pour l'analyse) et un moteur de détection comportementale fondé sur un autoencodeur variationnel à mémoire longue (LSTM-VAE). Ce dernier fonctionne avec une latence d'inférence de 2 à 4 millisecondes par séquence, très en deçà de la cible de 15 millisecondes. Son seuil a été calibré en comparant quatre points de fonctionnement ; le point retenu produit un rappel de 51,89\,\% pour 9,23\,\% de séquences signalées à tort, une aire sous la courbe ROC de 0,79 et une aire sous la courbe précision-rappel de 0,84. Ces faux positifs sont absorbés par une règle de persistance temporelle avant toute action automatique.
+
+La seconde \textit{Release}, consacrée à la prévention et à la réponse, a ajouté quatre capacités : une veille sur les menaces (CTI) qui agrège des sources ouvertes, trie les articles et propose des règles de détection candidates soumises à validation ; une chaîne de sensibilisation qui transforme les menaces à caractère humain en parcours de formation ciblés, avec un suivi de conformité ; un orchestrateur de réponse à plusieurs paliers, capable d'isoler une source malveillante de façon autonome ou après validation d'un analyste ; et un tableau de bord SOC présentant les incidents, leur diagnostic structuré par un modèle de langage local, l'état de l'infrastructure et un rapport d'audit exportable.
+
+% DÉPEND DU BLOC 9 de Chapitre3_ajouts.tex (évaluation par rejeu). Si ce bloc n'est pas inséré, supprimer le paragraphe suivant.
+La validation ne s'est pas limitée à des mesures sur un jeu de données de référence. Le système a été confronté à des attaques réellement exécutées depuis une machine dédiée (balayages de ports, identification de services, force brute SSH, scan applicatif web, inondation SYN), dont les six campagnes rejouées dans l'ordre chronologique ont toutes été détectées, avec un taux de $0{,}18\,\%$ de fenêtres bénignes signalées à tort sur le trafic réel des nœuds de l'infrastructure. Cette démarche a surtout permis d'identifier puis de corriger des défauts concrets que l'implémentation seule ne révélait pas : une sélection de caractéristiques défavorable à certaines classes d'attaques, un fichier de règles non référencé par la sonde, des faux positifs provoqués par le trafic du pipeline lui-même, et, du côté des agents d'intelligence artificielle, des sorties désorganisées, des règles recopiées d'un jeu de référence, des étiquettes de source qui biaisaient le classement et des droits d'accès insuffisants pour l'agent de déploiement.
+
+\section*{Réponse à la problématique}
+
+Le tableau~\ref{tab:bilan_defis} confronte les résultats aux cinq défis posés au premier chapitre.
+
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+\small
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}p{2.7cm}|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}p{2.3cm}|}
+\caption{Bilan au regard des cinq défis de la problématique}
+\label{tab:bilan_defis} \\
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Défi} & \textbf{Réponse apportée} & \textbf{Résultat observé} & \textbf{Statut} \\ \hline
+\endfirsthead
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Défi} & \textbf{Réponse apportée} & \textbf{Résultat observé} & \textbf{Statut} \\ \hline
+\endhead
+\endfoot
+\endlastfoot
+
+1.~Latence & Inférence compilée, tampon glissant de dix pas, pré-filtres volumétriques & Inférence de 2 à 4\,ms par séquence ; décision d'isolation émise environ dix secondes après le début des attaques testées, délai dominé par le remplissage de la fenêtre d'observation & Atteint \\ \hline
+2.~Faux positifs & Calibration du seuil, persistance 3 sur 5, neutralisation des actifs connus par liste blanche & 9,23\,\% de séquences signalées à tort hors ligne, absorbés par la persistance ; 0,18\,\% de fenêtres signalées à tort sur le trafic réel de l'infrastructure & Atteint sur les actifs connus \\ \hline
+3.~Comportements inconnus & Détection non supervisée, complémentaire des signatures & Force brute SSH détectée alors qu'aucune règle n'est applicable ; rappel global de 51,89\,\% et angle mort documenté sur le balayage de ports & Partiellement atteint \\ \hline
+4.~Accessibilité & Composants libres, modèle de langage local pour l'analyse des incidents et la veille, modèles distants limités à la génération de contenus pédagogiques avec repli local & Chaîne complète exécutable sans licence ni service obligatoire & Atteint \\ \hline
+5.~Continuité de la réponse & Orchestrateur multi-paliers, mode autonome, validation humaine possible, traçabilité par rapports d'audit, surveillance des nœuds & Isolation autonome en l'absence d'opérateur, rapports exportables, panne d'un nœud signalée en moins de 15 secondes & Atteint \\ \hline
+\end{xltabular}
+\endgroup
+
+Au regard des objectifs, les sept objectifs fonctionnels ont été réalisés. Parmi les objectifs non fonctionnels, la latence d'inférence (ONF3), l'autonomie opérationnelle (ONF4) et la maîtrise de l'infrastructure (ONF5) sont atteints. La performance de détection (ONF1) et la fiabilité (ONF2) le sont dans les limites de l'évaluation menée, que la section suivante précise.
+
+\section*{Limites du travail}
+
+\begin{itemize}
+    \item \textbf{Portée de l'évaluation.} Les attaques réelles ne sont qu'au nombre de six, exécutées dans un laboratoire à site unique ; un taux de détection de 6 sur 6 reste compatible, à 95\,\% de confiance, avec un taux réel compris entre 61 et 100\,\%. Le jeu de référence, issu de 2017, ne reflète pas toutes les pratiques d'attaque actuelles. Ces résultats attestent le fonctionnement de bout en bout de la chaîne, sans valeur statistique généralisable.
+    \item \textbf{Écart entre entraînement et production.} En production, certaines caractéristiques, notamment les drapeaux TCP, sont approximées à partir des agrégats de flux et non comptées paquet par paquet comme dans les données d'entraînement. Le dispositif compense cet écart par une neutralisation réservée aux adresses de la liste blanche : le comportement du modèle sur un hôte inconnu au trafic ordinaire n'a pas été évalué, et le rappel hors ligne reste limité sur le balayage de ports.
+    \item \textbf{Fiabilité des modèles de langage de petite taille.} Le modèle local de trois milliards de paramètres produit des diagnostics utiles mais perfectibles : technique MITRE ATT\&CK parfois inexacte, recommandations de remédiation inégales, scores de fiabilité parfois aberrants, règles recopiées. Ces sorties sont des propositions ; la validation humaine, le contrôle de structure et le test à blanc par le moteur Suricata restent indispensables, et ce dernier ne vérifie que la syntaxe, non la pertinence d'une règle.
+    \item \textbf{Sécurité du plan de contrôle interne.} Dans le laboratoire isolé, les commandes de remédiation transmises par le canal temps réel ne sont pas authentifiées et le bus de messages n'est ni authentifié ni chiffré. Cette configuration n'est pas acceptable hors d'un réseau fermé.
+    \item \textbf{Périmètre réseau et capacité.} Le blocage repose sur l'adresse IPv4 source, les adresses IPv6 de portée locale étant écartées ; la protection de la couche liaison ne couvre qu'un nœud et qu'une adresse ; le passage à l'échelle (courtier unique, inférence sur processeur) n'a pas été évalué.
+\end{itemize}
+
+\section*{Perspectives}
+
+Plusieurs évolutions permettraient de prolonger ce travail.
+
+\begin{itemize}
+    \item \textbf{Rétablir la parité entre entraînement et production} en calculant de véritables compteurs de drapeaux à la périphérie, ou en recalibrant et en réentraînant le modèle sur du trafic bénin local capturé avec le même extracteur, ce qui rendrait la neutralisation inutile.
+    \item \textbf{Élargir l'évaluation} : campagnes plus nombreuses et plus variées (attaques lentes, tentatives d'évasion, trafic bénin diversifié) permettant des intervalles de confiance resserrés.
+    \item \textbf{Renforcer la validation des règles générées} par un test sur trafic rejoué avant déploiement, en complément du test à blanc syntaxique, et par un contrôle de leur pertinence vis-à-vis de l'article source.
+    \item \textbf{Sécuriser le plan de contrôle} : authentification des clients et des commandes, chiffrement et authentification du bus de messages, signature des règles déployées.
+    \item \textbf{Exploiter les décisions des analystes} (approbations, faux positifs déclarés) pour recalibrer le seuil et réentraîner périodiquement le modèle.
+\end{itemize}
+
+Sur le plan personnel, ce projet nous a conduit à articuler des compétences habituellement séparées : réseaux et sécurité, apprentissage automatique, ingénierie logicielle distribuée et conduite de projet agile. Il nous a surtout appris que la valeur d'un système de sécurité se mesure autant à la rigueur avec laquelle on le met à l'épreuve qu'à ses performances annoncées. En ce sens, NG-IDPS constitue une base crédible et améliorable pour les organisations qui cherchent à acquérir une capacité de cyberdéfense proactive tout en conservant la maîtrise de leurs données.
