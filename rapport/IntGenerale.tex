@@ -6,44 +6,27 @@
 
 % \chapter*{Introduction Générale}
 \label{chap:intro}
-\addcontentsline{toc}{chapter}{Introduction Générale}
+% ==============================================================================
+% INTRODUCTION GÉNÉRALE
+% ==============================================================================
+À l'ère de la transformation numérique, l'interconnexion croissante des systèmes d'information et la dépendance des organisations vis-à-vis de leurs infrastructures réseau marquent une rupture significative avec les pratiques traditionnelles de la sécurité informatique. Le paysage des menaces évolue en parallèle : les cyberattaques deviennent plus variées, plus automatisées et plus difficiles à caractériser à l'avance. La défense moderne ne peut plus reposer uniquement sur des règles prédéfinies ; elle s'appuie désormais sur la complémentarité de plusieurs mécanismes : détection par signatures, analyse comportementale fondée sur l'apprentissage automatique, corrélation de sources multiples, renseignement sur les menaces et automatisation de la réponse. Cette convergence redéfinit les standards de réactivité, de résilience et d'efficacité des centres opérationnels de sécurité (\textit{Security Operations Center}, SOC).
 
-À l'ère de la transformation numérique et de l'hyper-connectivité, les infrastructures informatiques et les réseaux critiques font face à une menace croissante : les cyberattaques. Cette évolution vers un paysage de menaces sophistiquées et décentralisées marque une rupture significative avec les approches traditionnelles de la sécurité informatique. La défense moderne repose désormais sur l'exploitation de technologies émergentes — intelligence artificielle (IA), apprentissage automatique (Machine Learning), orchestration automatisée (SOAR) et analyse cognition en temps réel — permettant une détection proactive des intrusions, une réaction instantanée aux anomalies comportementales, et une protection autonome 24/7 des actifs critiques. Cette convergence entre détection temps réel, apprentissage profond et orchestration intelligente redéfinit les standards de résilience, de réactivité et de cyber-résilience au sein des organisations publiques et privées.
+Dans un pays en développement comme la Tunisie, l'adoption de ces approches reste encore limitée. De nombreuses organisations disposent de ressources humaines et financières restreintes et ne peuvent pas assurer une supervision permanente de leurs réseaux. Elles s'appuient souvent sur des mécanismes de protection statiques, les exposant à des délais de détection importants, à des alertes difficiles à exploiter et à des attaques qu'aucune règle connue ne décrit encore. Par ailleurs, les plateformes commerciales intégrées reposent fréquemment sur des licences ou des services dans le nuage qui ne conviennent pas toujours aux organisations soucieuses de conserver la maîtrise de leurs données. Cette situation freine la mise en place d'une stratégie de cyberdéfense proactive et autonome.
 
-Selon le rapport Verizon Data Breach Investigations Report (2024), 87 \% des organisations ne disposent pas d'une capacité de détection autonome des intrusions, et le temps moyen de détection des menaces dépasse encore 200 jours. En Afrique du Nord, particulièrement en Tunisie, cette situation s'aggrave : les entreprises et institutions gouvernementales s'appuient majoritairement sur des solutions de sécurité passives (pare-feu statiques, signatures de malwares statiques) exposant leurs opérations à des délais de détection critiques, à des faux positifs massifs paralyzing les équipes SOC (Security Operations Center), et à l'incapacité de capturer les attaques zéro-jour comportementales. Cette lacune freine l'adoption d'une stratégie de cyber-défense prédictive efficace et empêche l'exploitation optimale de l'intelligence des données réseau.
+C'est dans cette optique que s'inscrit le présent projet de fin d'études, réalisé à l'Institut Supérieur d'Informatique de Mahdia (ISIMa), dans le cadre du Mastère Professionnel en Computer Engineering, spécialité Expert Réseaux. L'objectif principal du projet est de concevoir, de réaliser et de valider un système de détection et de prévention des intrusions réseau de nouvelle génération, désigné \textbf{NG-IDPS} (\textit{Next-Generation Intrusion Detection and Prevention System}), capable de fonctionner de manière autonome dans un environnement local et isolé. Ce système vise à combiner plusieurs mécanismes de détection complémentaires, à analyser et à corréler les événements de sécurité, et à déclencher des actions de réponse maîtrisées, tout en restant accessible à des organisations disposant de moyens limités.
 
-C’est dans cette optique que s’inscrit le présent projet de fin d’études, réalisé au sein de l’Institut Supérieur d’Informatique de Mahdia (ISIMa), et portant sur la problématique de la cyber-résilience des organisations tunisiennes. L’objectif principal du projet \textbf{NG-IDPS}(Next-Generation Intrusion Detection and Prevention System) est de concevoir, développer et valider un système autonome de cyber-défense capable de :
-
-\begin{itemize}
-
-\item \textbf{Détecter} les intrusions réseau via une combinaison hybride de signatures (Suricata IDS) et d'anomalies comportementales (LSTM-VAE 16 features avec seuil calibré $\mu + 3\sigma$);
-
-\item \textbf{Analyser} les incidents détectés via une approche cognitive multi-factorielle (score composite : 40\% Suricata + 30\% ML + 30\% LLM);
-
-\item \textbf{Bloquer} automatiquement les menaces selon une escalade intelligente SOAR 3 niveaux (blocage SSH instantané, alertes WebSocket, auto-pilote nuit);
-
-\item \textbf{Enrichir} continuellement la défense via des agents IA (CTI, OSINT, RAG sur 49K règles Suricata) et une mémoire menace locale (FAISS + SQLite);
-
-\item \textbf{Superviser} l'intégralité de la pipeline via un tableau de bord SOC temps réel (Next.js/Node.js) avec glassmorphisme cyber et émission audio Web Audio API.
-
-\end{itemize}
-
-Le système cible une architecture distribuée sur 4 nœuds VM (edge, ML, response) + HOST GPU, avec orchestration événementielle via Apache Kafka (5 topics), inférence LSTM-VAE <15 ms, et défense entièrement autonome (0 délai Palier 3).
-
-\textbf{Le présent mémoire retrace les différentes étapes de conception, de développement et de validation de cette solution.} Il est structuré en cinq chapitres :
+Le présent mémoire retrace les différentes étapes de conception, de développement et de validation de ce projet. Il est structuré en quatre chapitres, suivis d'une conclusion générale :
 
 \begin{itemize}
+    \item \textbf{Le premier chapitre} pose le cadre du projet en présentant son contexte, sa problématique et ses objectifs, en étudiant les solutions existantes et en exposant la méthodologie de travail retenue.
 
-\item \textbf{Le premier chapitre} — \textbf{Présentation du Projet et Étude de l'Existant} — pose le cadre du projet en présentant le contexte de cyber-menace contemporain, la problématique des SOC débordés, l'analyse comparative des solutions existantes (Snort, Zeek, Darktrace, Elastic Security, etc.), ainsi que l'innovation et la contribution scientifique de NG-IDPS (détection hybride signature + anomalie, SOAR déterministe, analyse cognitive LLM locale, FAISS+RAG pour enrichissement continu).
+    \item \textbf{Le deuxième chapitre} est consacré à la phase préparatoire : l'analyse et la spécification des besoins fonctionnels et non fonctionnels, la planification selon la méthodologie agile Scrum, la justification des choix technologiques et la présentation de l'architecture générale.
 
-\item \textbf{Le deuxième chapitre} — \textbf{Phase Préparatoire et Ingénierie Système} — est consacré à l'analyse des besoins fonctionnels et non-fonctionnels (SLA <15 ms, Recall $\geq$40\%, Precision $\geq$95\%), à la planification selon la méthodologie Scrum (2 Releases, 5 Sprints), et à la justification des choix architecturaux (Kafka vs SQS, Ollama local vs API cloud, LSTM-VAE vs Isolation Forest vs Deep SVDD, Next.js vs Django).
+    \item \textbf{Le troisième chapitre} traite de la première \textit{Release}, dédiée à la détection : l'acquisition du trafic réseau, l'acheminement des données et la détection comportementale, ainsi que leur validation expérimentale.
 
-\item \textbf{Le troisième chapitre} — \textbf{Release 1 — Détection et Ingestion Temps Réel} — détaille les Sprints 1–2 couvrant l'ingestion Kafka double-voie (Fast Data pour ML, Cold Data pour ELK), le déploiement Suricata avec geolocalisation Filebeat, le moteur d'inférence LSTM-VAE 16 features avec calibration hybride (seuil OR-gate), les boucliers anti-DDoS volumétrique et rate-limiting, ainsi que la validation expérimentale sur CICIDS2017 (Recall 44.70\%, FPR 0.74\%, Precision 98.67\%, F1 0.6153).
+    \item \textbf{Le quatrième chapitre} détaille la seconde \textit{Release}, dédiée à la prévention et à la réponse : l'anticipation des menaces par le renseignement, la sensibilisation des utilisateurs, l'orchestration de la réponse automatisée et la supervision par un tableau de bord dédié.
 
-\item \textbf{Le quatrième chapitre} — \textbf{Release 2 — Prévention, Agents IA et Orchestration SOAR} — présente les Sprints 3–5 intégrant l'agent CTI autonome (FAISS+Llama3.2 pour génération règles), l'agent LMS Gemini (sensibilisation post-incident), le dashboard SOC Next.js avec WebSockets temps réel, le scoring tri-factoriel de menace, l'orchestration SOAR 3 niveaux avec iptables SSH, et l'agent post-attaque pour analyse cognitive structurée JSON.
-
-\item \textbf{Le cinquième chapitre} — \textbf{Conclusion Générale} — synthétise les résultats, quantifie l'impact de NG-IDPS versus baselines, discute des limitations (FPR mitigé par fenêtre glissante + whitelist), et propose des perspectives futures (Kubernetes, détection multi-VMs, intégration MISP CTI, fine-tuning Llama3 pour domaine cyber-tunisien).
-
+    \item \textbf{La conclusion générale} dresse le bilan du travail réalisé, en discute les limites et propose des perspectives d'évolution.
 \end{itemize}
 
-À travers ce travail, nous avons cherché à apporter une réponse concrète et scientifiquement rigoureuse aux besoins critiques de cyber-défense autonome dans le contexte tunisien et plus largement africain, en proposant une solution technologique innovante, sécurisée par conception (isolation vm-response, whitelisting, cooldown socle), facilement déployable sur l'infrastructure existante (Docker-ready, déploiement natif sur 4 VMs), et validée expérimentalement par apprentissage profond et orchestration décisionnelle hybride signature + anomalie + cognitive LLM. NG-IDPS incarne la convergence entre défense proactive, intelligence artificielle opérationnelle et supervision centralisée — trois piliers indispensables pour une cyber-résilience durable.
+À travers ce travail, nous avons cherché à apporter une réponse concrète aux besoins de protection des infrastructures réseau des organisations tunisiennes, en proposant une solution rigoureuse, maîtrisable localement et intégrable à des environnements existants.

@@ -1,0 +1,1129 @@
+% ==============================================================================
+% CHAPITRE 2 : PHASE PRÉPARATOIRE ET ARCHITECTURE GLOBALE
+% ==============================================================================
+
+\chapter{Phase Préparatoire et Ingénierie Système}
+\label{chap:chap2}
+
+\minitoc
+\newpage
+
+%========================================
+\section{Introduction}
+%========================================
+
+\label{sec}
+
+Avant d'aborder l'implémentation du moteur de détection, plusieurs décisions préalables doivent être établies afin de définir précisément le périmètre fonctionnel de NG-IDPS, les contraintes auxquelles le système doit répondre et les choix technologiques permettant sa réalisation. Cette phase préparatoire vise ainsi à transformer les objectifs définis au chapitre~\ref{chap} en exigences fonctionnelles et non fonctionnelles, puis à les traduire en éléments d'architecture et de planification.
+
+Dans un contexte caractérisé par des ressources matérielles et financières limitées, ces décisions doivent également tenir compte des contraintes réelles de déploiement et d'exploitation du système. Il s'agit notamment de déterminer les acteurs et les interactions avec la plateforme, les fonctionnalités attendues, les exigences de performance et de sécurité, ainsi que les composants logiciels nécessaires à la mise en œuvre de la chaîne de détection, d'analyse, de corrélation et de réponse.
+
+Ce chapitre présente ainsi la démarche d'ingénierie suivie avant la phase de réalisation. La section~\ref{sec} établit l'analyse et la spécification des besoins fonctionnels et non fonctionnels. Ces besoins sont ensuite représentés à travers le diagramme de cas d'utilisation présenté dans la section~\ref{sec}, puis structurés sous la forme d'un backlog produit dans la section~\ref{sec}. La section~\ref{sec} présente la planification du développement à travers les différents Sprints retenus pour le projet.
+
+La section~\ref{sec} décrit ensuite l'environnement de développement ainsi que les technologies retenues pour les différentes fonctions du système, en tenant compte des contraintes matérielles, logicielles et de déploiement. Enfin, la section~\ref{sec} présente l'architecture générale de NG-IDPS et les principaux flux entre ses composants. Cette architecture constitue le cadre de référence pour les phases d'implémentation et d'intégration développées dans les chapitres suivants.
+
+
+\section{Analyse et spécification des besoins}
+\label{sec:besoins}
+
+Les besoins du système ont été identifiés à partir de deux sources complémentaires : d'une part, la problématique des centres opérationnels de sécurité (\textit{Security Operations Center}, SOC) présentée au chapitre~\ref{chap:chap1}, notamment les enjeux liés à la surcharge des analystes et aux délais de réaction \cite{vielberth2020soc}, d'autre part, les contraintes propres à l'environnement d'expérimentation retenu pour le projet.
+
+La spécification des besoins s'appuie sur les principes de formulation des exigences définis par la norme ISO/IEC/IEEE~29148 \cite{iso29148}. Chaque exigence est associée à un identifiant unique et formulée de manière à être compréhensible, vérifiable et traçable. La formulation des exigences est également indépendante, autant que possible, des choix d'implémentation, afin de distinguer les fonctionnalités attendues des solutions techniques retenues pour les réaliser.
+
+L'analyse débute par l'identification des acteurs susceptibles d'interagir directement ou indirectement avec NG-IDPS. Les besoins fonctionnels et non fonctionnels sont ensuite dérivés de ces interactions et structurés afin de permettre leur association aux cas d'utilisation, aux éléments du backlog et, ultérieurement, aux composants de l'architecture et aux tests de validation.
+
+
+\subsection{Identification des acteurs}
+\label{sec:acteurs}
+
+Dans le cadre de la modélisation UML, un acteur désigne une entité extérieure au système qui interagit avec celui-ci afin de déclencher une fonctionnalité ou de lui fournir des informations \cite{omg2017uml}. L'identification des acteurs permet ainsi de délimiter le périmètre fonctionnel de NG-IDPS et de définir les principales interactions représentées dans le diagramme de cas d'utilisation présenté à la section~\ref{sec:uc}.
+
+Quatre catégories d'acteurs externes sont retenues pour NG-IDPS : l'administrateur SOC, l'employé, l'attaquant et les sources de renseignement. Leurs rôles et leurs interactions principales avec le système sont présentés dans le tableau~\ref{tab:acteurs}.
+
+% Prérequis à inclure dans votre préambule :
+% \usepackage{xltabular}
+% \usepackage{array}
+% \usepackage[table]{xcolor}
+
+\renewcommand{\arraystretch}{1.5}
+\small
+\begin{xltabular}{\textwidth}{|l|l|>{\raggedright\arraybackslash}X|}
+
+\caption{Acteurs de NG-IDPS}
+\label{tab:acteurs} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Acteur} & \textbf{Type} & \textbf{Rôle et interaction} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Acteur} & \textbf{Type} & \textbf{Rôle et interaction} \\ \hline
+\endhead
+
+Administrateur SOC & Principal &
+Analyste ou responsable de la sécurité. Il supervise l'état du système, consulte les alertes et les événements de sécurité, et peut intervenir dans le processus de réponse depuis l'interface de supervision. \\
+\hline
+
+Employé & Principal &
+Collaborateur de l'organisation susceptible d'être concerné par un incident de sécurité. Il peut recevoir des communications ou des actions de sensibilisation générées par le système. \\
+\hline
+
+Attaquant & Externe &
+Source potentielle de trafic ou d'activité malveillante susceptible d'être détectée par NG-IDPS. Dans l'environnement expérimental, cet acteur est représenté par une machine dédiée exécutant Kali Linux. \\
+\hline
+
+Sources de renseignement & Externe &
+Sources externes de renseignement sur les menaces, notamment les flux OSINT et les bases de règles publiques, susceptibles d'alimenter les mécanismes de renseignement sur les menaces du système. \\
+\hline
+
+\end{xltabular}
+
+%------------------------------------------------------------------------------
+\subsection{Besoins fonctionnels}
+\label{sec:bf}
+%------------------------------------------------------------------------------
+Les besoins fonctionnels décrivent les services et comportements attendus de NG-IDPS. Ils sont regroupés selon les acteurs qui interagissent avec le système lorsque cette interaction est pertinente. Les besoins internes au fonctionnement autonome de la plateforme sont regroupés séparément sous la responsabilité du système, et non considérés comme des acteurs UML.
+
+Chaque besoin est associé à un identifiant unique. Ces identifiants sont repris dans le backlog présenté à la (section~\ref{sec:backlog}), afin d'assurer la traçabilité entre les exigences fonctionnelles, les récits utilisateurs, les éléments d'implémentation et les Sprints correspondants.  
+
+\subsubsection{Besoins fonctionnels de l'Administrateur SOC}
+
+Les besoins suivants décrivent les principales fonctionnalités mises à disposition de l'Administrateur SOC pour superviser le système et intervenir dans le traitement des incidents.
+
+% Prérequis à inclure dans votre préambule :
+% \usepackage{xltabular}
+% \usepackage{array}
+% \usepackage[table]{xcolor}
+
+\renewcommand{\arraystretch}{1.5}
+\small
+\begin{xltabular}{\textwidth}{|l|>{\raggedright\arraybackslash}X|}
+
+\caption{Besoins fonctionnels de l'Administrateur SOC}
+\label{tab:bf-admin} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Réf.} & \textbf{Besoin} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Réf.} & \textbf{Besoin} \\ \hline
+\endhead
+
+BF-A1 & S'authentifier auprès du tableau de bord (jeton JWT) avant tout accès aux données. \\ \hline
+BF-A2 & Suivre en temps réel les alertes et incidents entrants, avec leur sévérité, l'adresse source et la technique MITRE ATT\&CK associée, et être averti par un signal sonore au-delà d'un seuil de gravité. \\ \hline
+BF-A3 & Consulter le rapport d'incident structuré produit par l'agent d'analyse, puis l'exporter au format PDF. \\ \hline
+BF-A4 & Piloter la réponse : confirmer, bloquer ou débloquer manuellement une adresse depuis l'interface (événement \texttt{send\_command}). \\ \hline
+BF-A5 & Superviser l'état des machines virtuelles et des services (processeur, mémoire, disque, disponibilité). \\ \hline
+BF-A6 & Consulter les renseignements CTI collectés et les règles de détection générées. \\ \hline
+BF-A7 & Mener une investigation rétrospective sur les journaux bruts via Kibana. \\ \hline
+BF-A8 & Régler ses préférences : seuils d'alerte, volume sonore, notifications. \\ \hline
+
+\end{xltabular}
+
+
+\subsubsection{Besoins fonctionnels de l'Employé}
+
+Les besoins associés à l'Employé concernent principalement les actions de sensibilisation et d'évaluation déclenchées à la suite d'un incident de sécurité.
+
+% Prérequis dans le préambule :
+% \usepackage{xltabular}
+% \usepackage{array}
+% \usepackage[table]{xcolor}
+
+\renewcommand{\arraystretch}{1.5}
+\small
+\begin{xltabular}{\textwidth}{|l|>{\raggedright\arraybackslash}X|}
+
+\caption{Besoins fonctionnels de l'Employé}
+\label{tab:bf-employe} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Réf.} & \textbf{Besoin} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Réf.} & \textbf{Besoin} \\ \hline
+\endhead
+
+BF-E1 & Recevoir par courriel un parcours de sensibilisation adapté à l'incident qui vient d'être détecté. \\ \hline
+BF-E2 & Consulter le contenu pédagogique associé : cours, schémas et questionnaire à choix multiples (QCM). \\ \hline
+BF-E3 & Passer l'évaluation et obtenir une attestation lorsque le score atteint au moins 70. \\ \hline
+
+\end{xltabular}
+
+\subsubsection{Besoins fonctionnels de l'Agent autonome}
+
+Ces besoins décrivent les fonctions exécutées automatiquement par les différents composants internes de NG-IDPS, sans constituer des acteurs UML externes.
+
+% Prérequis dans le préambule :
+% \usepackage{xltabular}
+% \usepackage{array}
+% \usepackage[table]{xcolor}
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|l|>{\raggedright\arraybackslash}X|}
+
+\caption{Besoins fonctionnels de l'Agent autonome}
+\label{tab:bf-agent} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Réf.} & \textbf{Besoin} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Réf.} & \textbf{Besoin} \\ \hline
+\endhead
+
+BF-S1 & Capturer et inspecter le trafic réseau en continu (détection par signatures). \\ \hline
+BF-S2 & Extraire 16 caractéristiques statistiques du trafic et les publier vers Kafka, en parallèle de l'envoi des journaux bruts vers la pile d'analyse rétrospective. \\ \hline
+BF-S3 & Détecter les comportements anormaux par reconstruction séquentielle (LSTM-VAE), en filtrant le bruit par persistance, liste blanche et temps de repos. \\ \hline
+BF-S4 & Se protéger des rafales volumétriques : bouclier anti-DDoS global et limitation de débit par adresse source. \\ \hline
+BF-S5 & Dédupliquer et corréler les alertes, puis calculer un score de menace composite $S = 0{,}4\,S_{\mathrm{Suricata}} + 0{,}3\,S_{\mathrm{LSTM-VAE}} + 0{,}3\,S_{\mathrm{LLM}}$ pour décider de la réponse. \\ \hline
+BF-S6 & Bloquer une adresse hostile par règle \texttt{iptables} exécutée à distance via SSH, sans délai pour les alertes les plus graves, et lever le blocage à l'expiration. \\ \hline
+BF-S7 & Notifier les analystes connectés ; si aucun ne l'est, envoyer un courriel puis basculer en mode Auto-Pilote. \\ \hline
+BF-S8 & Produire un rapport d'incident à sept champs par un LLM local, avec un rapport de repli si le modèle est indisponible. \\ \hline
+BF-S9 & Enrichir la détection : veille OSINT, génération de règles Suricata, validation par schéma puis essai à blanc avant déploiement. \\ \hline
+BF-S10 & Vérifier périodiquement (toutes les 15 secondes) la santé des machines virtuelles et persister les incidents en base. \\ \hline
+
+\end{xltabular}
+%------------------------------------------------------------------------------
+\subsection{Besoins non fonctionnels}
+\label{sec:bnf}
+%------------------------------------------------------------------------------
+
+Les besoins non fonctionnels (BNF) décrivent les propriétés de qualité et les contraintes auxquelles NG-IDPS doit satisfaire au-delà des fonctionnalités attendues. Leur formulation s'appuie sur les caractéristiques de qualité définies par la norme ISO/IEC~25010 \cite{iso25010}, complétées, lorsque nécessaire, par les contraintes spécifiques de l'environnement expérimental.
+
+Afin de garantir leur vérifiabilité, chaque besoin est associé à un critère d'évaluation mesurable ou à une procédure de vérification permettant de déterminer objectivement son respect.
+
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|l|l|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|}
+
+\caption{Besoins non fonctionnels de NG-IDPS}
+\label{tab:bnf_ng_idps} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Réf.} & \textbf{Caractéristique} & \textbf{Exigence} & \textbf{Critère de vérification} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Réf.} & \textbf{Caractéristique} & \textbf{Exigence} & \textbf{Critère de vérification} \\ \hline
+\endhead
+
+BNF-1 & Efficacité de performance &
+Le traitement d'une séquence par le modèle LSTM-VAE doit présenter une latence suffisamment faible pour ne pas constituer un goulot d'étranglement du pipeline de détection. &
+Latence d'inférence inférieure à 15~ms par séquence, mesurée sur l'environnement matériel expérimental. \\ \hline
+
+BNF-2 & Fiabilité &
+Le système doit continuer à assurer les fonctions essentielles de détection et de supervision lorsqu'un composant non critique devient indisponible. &
+Vérification par scénarios de défaillance contrôlée et observation du mécanisme de repli, de la surveillance et du redémarrage des composants concernés. \\ \hline
+
+BNF-3 & Sécurité &
+Les accès aux interfaces et aux ressources sensibles doivent être contrôlés et les informations d'authentification ou secrets de configuration ne doivent pas être exposés en clair. &
+Vérification de l'authentification JWT, de l'utilisation de clés SSH, de l'absence de secrets dans le code source et de la configuration du pare-feu \texttt{ufw}. \\ \hline
+
+BNF-4 & Compatibilité &
+Les composants du système doivent pouvoir échanger des données selon des interfaces et des formats définis et stables. &
+Vérification des événements Socket.io \texttt{soar\_incident\_incoming}, \texttt{soar\_incident\_updated} et \texttt{send\_command}, ainsi que du format JSON défini pour les échanges inter-composants. \\ \hline
+
+BNF-5 & Maintenabilité &
+Les composants doivent être suffisamment découplés pour permettre leur redémarrage individuel sans provoquer l'arrêt des autres services non concernés. &
+Test de redémarrage individuel des services et vérification de la continuité des échanges inter-composants via les mécanismes de communication prévus. \\ \hline
+
+BNF-6 & Utilisabilité &
+L'interface de supervision doit permettre à un analyste d'identifier rapidement les incidents nécessitant une attention particulière. &
+Évaluation de la visibilité des alertes critiques au moyen des indicateurs visuels et sonores disponibles dans l'interface de supervision. \\ \hline
+
+BNF-7 & Confidentialité &
+Les données d'alerte destinées à l'analyse cognitive doivent pouvoir être traitées sans transmission obligatoire vers un service LLM externe. &
+Vérification que l'inférence du modèle de langage est exécutée localement via Ollama et qu'aucun appel à une API LLM externe n'est requis pour le fonctionnement nominal. \\ \hline
+
+\end{xltabular}
+
+
+
+%==============================================================================
+\section{Diagramme des cas d'utilisation globale}
+\label{sec:uc}
+%==============================================================================
+
+La figure~\ref{fig:uc-global} synthétise les besoins précédents. Nous avons choisi de représenter l'agent autonome comme un acteur à part entière, bien qu'il fasse partie du système : c'est une convention courante pour les systèmes qui agissent seuls, et elle rend visible ce que NG-IDPS fait en l'absence de tout opérateur.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.9\textwidth]{../diagrams/useCaseGlobal.png}
+  \caption{Diagramme de cas d'utilisation global de NG-IDPS}
+  \label{fig:uc-global}
+\end{figure}
+
+Deux remarques facilitent la lecture. D'abord, les cas UC2 à UC7 supposent une session ouverte : UC1 leur est implicitement inclus, ce que nous n'avons pas dessiné pour ne pas alourdir le schéma. Ensuite, l'attaquant n'est relié qu'à UC10 mais son influence traverse tout le côté droit du diagramme : c'est sa présence qui enclenche, de proche en proche, le blocage, l'analyse et, le cas échéant, la formation des employés concernés.
+
+%==============================================================================
+\section{Backlog du produit}
+\label{sec:backlog}
+%==============================================================================
+
+Le backlog est exprimé sous forme de récits utilisateur (\textit{user stories}), selon le gabarit « En tant que \dots{} je veux \dots{} afin de \dots{} » popularisé par Cohn \cite{cohn2004userstories}. La priorité suit la méthode MoSCoW : \textit{Must} pour ce sans quoi le produit n'a pas de sens, \textit{Should} pour ce qui apporte une forte valeur mais pourrait être différé, \textit{Could} pour le confort. L'ordre de la liste est celui de la valeur décroissante au sein de chaque sprint.
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|l|>{\raggedright\arraybackslash}X|l|l|l|}
+
+\caption{Backlog du produit}
+\label{tab:backlog} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF} 
+\textbf{Réf.} & \textbf{Récit utilisateur} & \textbf{Priorité} & \textbf{Sprint} & \textbf{Besoin} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF} 
+\textbf{Réf.} & \textbf{Récit utilisateur} & \textbf{Priorité} & \textbf{Sprint} & \textbf{Besoin} \\ \hline
+\endhead
+
+US-01 & En tant qu'administrateur, je veux que le trafic soit inspecté par une sonde de signatures afin de détecter les attaques connues. & Must & S1 & BF-S1 \\ \hline
+US-02 & En tant qu'agent autonome, je veux extraire 16 caractéristiques du trafic et les publier sur Kafka afin d'alimenter le moteur d'inférence sans délai. & Must & S1 & BF-S2 \\ \hline
+US-03 & En tant qu'administrateur, je veux conserver les journaux bruts dans une pile d'analyse afin d'enquêter a posteriori. & Should & S1 & BF-A7 \\ \hline
+US-04 & En tant qu'agent autonome, je veux détecter les comportements anormaux en moins de 15~ms afin de repérer les attaques sans signature. & Must & S2 & BF-S3 \\ \hline
+US-05 & En tant qu'administrateur, je veux que le bruit soit filtré (persistance, liste blanche, temps de repos) afin de ne traiter que les alertes crédibles. & Must & S2 & BF-S3 \\ \hline
+US-06 & En tant qu'agent autonome, je veux me protéger des rafales volumétriques afin de préserver la capacité d'inférence. & Must & S2 & BF-S4 \\ \hline
+US-07 & En tant qu'administrateur, je veux que de nouvelles règles soient générées à partir du renseignement OSINT afin d'anticiper les menaces émergentes. & Should & S3 & BF-S9 \\ \hline
+US-08 & En tant qu'administrateur, je veux que toute règle générée soit validée (schéma, essai à blanc) afin de ne pas dégrader la détection existante. & Must & S3 & BF-S9 \\ \hline
+US-09 & En tant qu'employé, je veux recevoir un parcours de sensibilisation adapté à l'incident afin de réduire le risque humain. & Could & S4 & BF-E1, E2 \\ \hline
+US-10 & En tant qu'employé, je veux valider mes acquis et obtenir une attestation afin de prouver ma mise à niveau. & Could & S4 & BF-E3 \\ \hline
+US-11 & En tant qu'administrateur, je veux m'authentifier et suivre en temps réel alertes et état des composants afin de piloter la sécurité depuis un point unique. & Must & S5 & BF-A1, A2, A5 \\ \hline
+US-12 & En tant qu'administrateur, je veux un rapport d'incident structuré et exportable afin de décider vite et de conserver une trace. & Must & S5 & BF-A3, S8 \\ \hline
+US-13 & En tant qu'agent autonome, je veux calculer un score de menace composite afin de prioriser la réponse. & Should & S5 & BF-S5 \\ \hline
+US-14 & En tant qu'agent autonome, je veux bloquer une adresse hostile via SSH, y compris en l'absence d'analyste, afin de garantir la défense 24~h/24. & Must & S5 & BF-S6, S7 \\ \hline
+US-15 & En tant qu'administrateur, je veux commander manuellement un blocage ou un déblocage afin de garder la main sur l'automatisme. & Should & S5 & BF-A4 \\ \hline
+US-16 & En tant qu'administrateur, je veux être alerté si une machine virtuelle tombe afin d'agir avant que le pipeline ne s'interrompe. & Should & S5 & BF-S10 \\ \hline
+
+\end{xltabular}
+%==============================================================================
+\section{Planification des sprints}
+\label{sec:planif}
+%==============================================================================
+
+Le projet suit la méthode Scrum \cite{schwaber2020scrumguide}, découpée en deux releases. Scrum a été adapté à une équipe d'une seule personne : les cérémonies collectives (mêlée quotidienne, par exemple) n'ont pas de sens ici, mais les artefacts essentiels ont été conservés : un backlog priorisé, des sprints à objectif unique et un incrément fonctionnel à l'issue de chacun.
+
+Le séquencement suit le cheminement de la donnée. La Release~1 construit ce qui \textit{voit} (ingestion et détection) ; la Release~2 construit ce qui \textit{agit} et ce qui \textit{s'explique} (anticipation, formation, supervision et réponse). Le tableau~\ref{tab:sprints} résume ce découpage.
+
+
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|l|l|>{\raggedright\arraybackslash}X|l|>{\raggedright\arraybackslash}X|}
+
+\caption{Planification des releases et des sprints}
+\label{tab:sprints} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Release} & \textbf{Sprint} & \textbf{Objectif} & \textbf{Récits} & \textbf{Livrable majeur} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Release} & \textbf{Sprint} & \textbf{Objectif} & \textbf{Récits} & \textbf{Livrable majeur} \\ \hline
+\endhead
+
+\multirow{3}{*}{Release 1} & S1 & Acquisition réseau et inspection sémantique (sonde Suricata, capture Zero-Copy) & 1.1 à 1.3 & Sonde opérationnelle, journalisation EVE JSON unifiée \\ \cline{2-5}
+ & S2 & Pipeline de données à double voie (rapide vers Kafka, froide vers ELK) & 2.1 à 2.4 & Bus Kafka, pipeline ETL Logstash, tableau de bord Kibana \\ \hline \cline{2-5}
+ & S3 & Détection comportementale par moteur d'inférence LSTM-VAE et filtrage du bruit & 3.1 à 3.7 & Pipeline temps réel sur VM-ML publiant les alertes d'anomalie \\ \hline
+
+\multirow{3}{*}{Release 2} & S4 & Anticipation par le renseignement (agent CTI et triage Dual-RAG) & US4.1 à US4.6 & Générateur de règles Suricata validées \\ \cline{2-5}
+ & S5 & Mitigation du risque humain (agent Gemini et RAG LMS) & US5.1 à US5.5 & Parcours de sensibilisation ciblés post-incident \\ \cline{2-5}
+ & S6 & Orchestration SOAR multi-paliers, agent post-attaque et dashboard SOC & US6.1 à US6.9 & Application de supervision et boucle de réponse fermée \\ \hline
+
+\end{xltabular}
+
+
+
+%==============================================================================
+\section{Environnement logiciel}
+\label{sec:env}
+%==============================================================================
+La réalisation de NG-IDPS mobilise une chaîne technologique hétérogène : capture réseau bas niveau, courtage de messages distribué, apprentissage profond, inférence de modèles de langage et développement web temps réel. Aucun choix technologique n'est anodin dans ce contexte contraint — une sonde mal dimensionnée perd des paquets, un courtier de messages mal choisi sature sous charge, un modèle de langage mal sélectionné compromet soit la confidentialité, soit la continuité de service. Cette section justifie, catégorie par catégorie, les technologies retenues pour construire l'environnement logiciel du projet.
+
+%------------------------------------------------------------------------------
+\subsection{Démarche de comparaison}
+%------------------------------------------------------------------------------
+
+Choisir une technologie parce qu'elle est à la mode ne se défend pas devant un jury ; la choisir parce qu'elle l'emporte sur ses concurrentes selon des critères explicites, si. Nous avons donc procédé en deux temps. Pour chaque catégorie, nous identifions les candidats sérieux et les critères qui comptent réellement dans notre contexte : un hôte unique de 24~Go, un budget nul, une latence d'inférence inférieure à 15~ms et des données d'analyse qui ne quittent pas le périmètre.
+
+Pour les trois décisions les plus structurantes (moteur de détection, bus de messages, modèle d'anomalie), nous formalisons le choix par une matrice de décision pondérée \cite{triantaphyllou2000mcdm}. Chaque candidat $c$ reçoit une note $s_i(c) \in \{1,\dots,5\}$ sur chacun des $n$ critères, et son score global vaut
+\begin{equation}
+S(c) = \sum_{i=1}^{n} w_i \, s_i(c), \qquad \sum_{i=1}^{n} w_i = 1,
+\label{eq:wsm}
+\end{equation}
+où $w_i$ traduit l'importance du critère $i$ pour NG-IDPS. Lorsque des évaluations publiées existent, elles fondent les notes ; sinon, celles-ci reflètent le jugement de l'auteur après lecture de la documentation officielle. Il faut le dire franchement : cette méthode ne produit pas une vérité mathématique, seulement une décision traçable que chacun peut contester en changeant un poids ou une note. Pour les autres catégories, une comparaison qualitative selon quelques critères discriminants suffit. Les mesures expérimentales (rappel, précision, latence) sont volontairement renvoyées au chapitre~3.
+
+%------------------------------------------------------------------------------
+\subsection{Infrastructure de virtualisation et système d'exploitation}
+%------------------------------------------------------------------------------
+
+Le projet repose sur plusieurs machines virtuelles reliées par un réseau privé (\texttt{192.168.56.0/24}) et sur un hôte Windows dont le GPU sert directement à l'inférence du modèle CTI. La notion de moniteur de machine virtuelle remonte à Popek et Goldberg \cite{popek1974virtualizable} ; ce qui nous intéresse ici est plus prosaïque : que l'outil tourne sous Windows, gère finement les réseaux virtuels et ne coûte rien. Le tableau~\ref{tab:virt} confronte les trois options réalistes.
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|}
+
+\caption{Comparaison des solutions de virtualisation}
+\label{tab:virt} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{VMware Workstation Pro} \cite{vmware_workstation} & \textbf{VirtualBox} \cite{virtualbox} & \textbf{KVM / Proxmox VE} \cite{kivity2007kvm,proxmox_docs} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{VMware Workstation Pro} \cite{vmware_workstation} & \textbf{VirtualBox} \cite{virtualbox} & \textbf{KVM / Proxmox VE} \cite{kivity2007kvm,proxmox_docs} \\ \hline
+\endhead
+
+Hôte supporté & Windows, Linux & Windows, Linux, macOS & Linux uniquement (Proxmox : machine dédiée) \\ \hline
+Réseaux virtuels & Host-only, NAT, pont, éditeur dédié & Host-only, NAT, pont & Ponts Linux, très flexibles \\ \hline
+Instantanés & Oui & Oui & Oui (qcow2) \\ \hline
+Coût & Gratuit pour l'usage personnel depuis 2024 & Gratuit & Gratuit \\ \hline
+Compatibilité avec un hôte Windows partagé avec un GPU & Oui & Oui & Non sans dédier la machine \\ \hline
+\textbf{Décision} & \textbf{Retenu} & Alternative valable & Écarté \\ \hline
+
+\end{xltabular}
+KVM est techniquement excellent, mais il suppose un hôte Linux, alors que notre machine de travail doit rester une station Windows utilisable au quotidien. Proxmox exigerait de la sacrifier entièrement. VirtualBox aurait techniquement fait l'affaire, la préférence pour VMware Workstation relève surtout du confort d'usage (éditeur de réseaux virtuels, gestion des instantanés) et non d'un avantage décisif.
+
+Côté système invité, nous avons retenu Ubuntu Server en version à support long terme (LTS), qui bénéficie de cinq ans de correctifs de sécurité en standard \cite{ubuntu_lifecycle}. Debian stable aurait offert une base plus conservatrice mais des paquets plus anciens ; Rocky Linux, compatible RHEL, se justifie surtout en contexte d'entreprise. Ubuntu présente l'avantage décisif de bénéficier d'un dépôt officiel pour Suricata et d'une documentation abondante pour tout le reste de la pile.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.25\textwidth]{../logo/VMware_Workstation.png}
+  \caption{Logo VMware Workstation Pro}
+  \label{fig:Logo_VMware_Workstation_Pro}
+\end{figure}
+
+%------------------------------------------------------------------------------
+\subsection{Détection d'intrusions réseau}
+%------------------------------------------------------------------------------
+
+Trois systèmes ouverts dominent le domaine : Snort, publié par Roesch dès 1999 \cite{roesch1999snort}, Bro, rebaptisé Zeek, présenté la même année par Paxson \cite{paxson1999bro}, et Suricata, développé par l'\textit{Open Information Security Foundation} (OISF) \cite{suricata_docs}. Les deux premiers reposent sur des philosophies différentes : Snort applique des signatures, Zeek analyse le comportement des protocoles et produit des journaux riches, tandis que Suricata reprend l'approche à signatures avec un moteur multi-fil et des analyseurs de protocoles natifs.
+
+Les études comparatives sont nuancées. Albin et Rowe, sur le trafic réel d'un réseau fédérateur, concluent que Suricata absorbe des volumes supérieurs à Snort à précision similaire et que ses performances progressent presque linéairement jusqu'à 48 processeurs \cite{albin2012suricata}. Shah et Issac, à 10~Gbit/s, observent moins de paquets perdus avec Suricata mais une consommation de ressources plus élevée, alors que Snort affichait la meilleure exactitude de détection au prix de nombreux faux positifs \cite{shah2018performance}. Notons que ces travaux portent sur Snort~2.x, monoprocessus ; Snort~3 introduit le multi-fil \cite{snort3_docs}, mais nous n'avons pas trouvé d'évaluation publiée comparable, ce qui nous a incités à la prudence dans la notation.
+
+Le tableau~\ref{tab:ids} applique la matrice pondérée (équation~\ref{eq:wsm}). Les poids privilégient le débit et l'intégration au pipeline, car la sonde alimente directement Kafka et la pile d'analyse.
+
+% Prérequis dans le préambule :
+% \usepackage{xltabular}
+% \usepackage{array}
+% \usepackage[table]{xcolor}
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}X|c|c|c|c|}
+
+\caption{Matrice de décision pour le moteur de détection réseau}
+\label{tab:ids} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{Poids} & \textbf{Suricata} & \textbf{Snort 3} & \textbf{Zeek} \cite{zeek_docs} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{Poids} & \textbf{Suricata} & \textbf{Snort 3} & \textbf{Zeek} \cite{zeek_docs} \\ \hline
+\endhead
+
+Débit et parallélisme & 0,25 & 5 & 3 & 4 \\ \hline
+Frugalité en ressources & 0,15 & 3 & 4 & 3 \\ \hline
+Intégration au pipeline (JSON natif, modules) & 0,25 & 5 & 3 & 4 \\ \hline
+Couverture de détection (signatures et protocoles) & 0,20 & 5 & 4 & 3 \\ \hline
+Maturité et communauté & 0,15 & 4 & 5 & 3 \\ \hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Score pondéré} & 1,00 & \textbf{4,55} & 3,65 & 3,50 \\ \hline
+
+\end{xltabular}
+
+
+
+Suricata l'emporte principalement grâce à son format de sortie JSON natif (EVE), exploitable directement par Filebeat, et à des paramètres de temporisation des flux ajustables ; leur réglage a permis, comme nous le verrons au chapitre~3, de ramener le délai de détection de bout en bout de plusieurs dizaines de secondes à quelques secondes. Snort reste le plus mature, mais cette maturité pèse moins que l'intégration dans notre pipeline. Zeek, remarquable pour la visibilité, n'est pas conçu comme un moteur de règles.
+
+Un dernier choix mérite d'être expliqué : Suricata fonctionne ici en mode IDS passif, et le blocage est délégué à la couche SOAR. Un mode IPS en ligne aurait rendu la sonde responsable de la disponibilité du réseau ; en cas de défaillance, c'est le trafic légitime qui s'arrêterait. Nous préférons qu'une panne de la détection dégrade la protection plutôt que la connectivité.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.3\textwidth]{../logo/Suricata.png}
+  \caption{Logo Suricata}
+  \label{fig:Logo_Suricata}
+\end{figure}
+
+%------------------------------------------------------------------------------
+\subsection{Collecte, indexation et visualisation des journaux}
+%------------------------------------------------------------------------------
+
+Les journaux bruts empruntent une voie dite \og froide \fg{}, hors du chemin critique de détection : ils servent à l'investigation rétrospective. Quatre plateformes sont candidates (tableau~\ref{tab:logs}). La pile Elastic est la référence du domaine \cite{gormley2015elasticsearch}.
+
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|}
+
+\caption{Comparaison des plateformes de gestion des journaux}
+\label{tab:logs} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{Elastic Stack 8.x} \cite{elastic_docs} & \textbf{OpenSearch} \cite{opensearch_docs} & \textbf{Graylog} \cite{graylog_docs} & \textbf{Splunk} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{Elastic Stack 8.x} \cite{elastic_docs} & \textbf{OpenSearch} \cite{opensearch_docs} & \textbf{Graylog} \cite{graylog_docs} & \textbf{Splunk} \\ \hline
+\endhead
+
+Licence et coût & Gratuit pour cet usage & Apache 2.0 & Édition ouverte gratuite & Commerciale, selon le volume \\ \hline
+Ingestion des journaux Suricata & Module Filebeat natif pour EVE JSON & Via Logstash ou Data Prepper & Via Beats ou GELF & Extension dédiée \\ \hline
+Visualisation & Kibana & OpenSearch Dashboards & Interface intégrée & Splunk Web \\ \hline
+Empreinte mémoire & Élevée (JVM) & Élevée (JVM) & Élevée (moteur + MongoDB) & Élevée \\ \hline
+\textbf{Décision} & \textbf{Retenu} & Alternative & Écarté & Écarté (coût) \\ \hline
+
+\end{xltabular}
+
+
+L'argument décisif est l'ingestion : Filebeat sait lire les journaux EVE de Suricata avec un module prêt à l'emploi, ce qui évite d'écrire un analyseur sur mesure. OpenSearch, dérivé d'une ancienne version d'Elasticsearch, serait une option sérieuse, mais son ingestion exige un maillon supplémentaire. Nous acceptons en revanche un inconvénient : l'empreinte mémoire de la JVM est lourde. C'est en partie ce qui justifie que la voie froide reste facultative pour le fonctionnement autonome du système, comme le prévoit la Release~2, qui ne dépend plus d'ELK.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.35\textwidth]{../logo/elk.png}
+  \caption{Logo Elastic Stack}
+  \label{fig:Logo_Elastic_Stack}
+\end{figure}
+
+%------------------------------------------------------------------------------
+\subsection{Transport de données en flux}
+%------------------------------------------------------------------------------
+
+Le lien entre la sonde, le moteur d'inférence, la couche SOAR et le tableau de bord doit être asynchrone, tolérant aux pannes et capable de \textit{rejouer} un même flux vers plusieurs consommateurs (inférence, agents d'analyse, historique). C'est le profil d'un journal distribué, modèle sur lequel repose Kafka, conçu à l'origine pour le traitement de journaux \cite{kreps2011kafka}. Le tableau~\ref{tab:broker} compare cinq options, dont un service géré du nuage (SQS \cite{sqs_docs}) souvent cité comme point de comparaison.
+
+% Prérequis dans le préambule :
+% \usepackage{xltabular}
+% \usepackage{array}
+% \usepackage[table]{xcolor}
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}X|c|c|c|c|c|c|}
+
+\caption{Matrice de décision pour le bus de messages}
+\label{tab:broker} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{Poids} & \textbf{Kafka} \cite{kafka_docs} & \textbf{Pulsar} \cite{pulsar_docs} & \textbf{RabbitMQ} \cite{rabbitmq_docs} & \textbf{Redis Streams} \cite{redis_streams} & \textbf{SQS} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{Poids} & \textbf{Kafka} \cite{kafka_docs} & \textbf{Pulsar} \cite{pulsar_docs} & \textbf{RabbitMQ} \cite{rabbitmq_docs} & \textbf{Redis Streams} \cite{redis_streams} & \textbf{SQS} \\ \hline
+\endhead
+
+Débit et latence & 0,25 & 5 & 4 & 3 & 4 & 3 \\ \hline
+Frugalité en ressources & 0,15 & 2 & 2 & 4 & 3 & 5 \\ \hline
+Persistance et rejeu & 0,25 & 5 & 5 & 3 & 3 & 2 \\ \hline
+Intégration (clients, connecteurs) & 0,20 & 5 & 3 & 4 & 3 & 3 \\ \hline
+Déploiement local & 0,15 & 5 & 5 & 5 & 5 & 1 \\ \hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Score pondéré} & 1,00 & \textbf{4,55} & 3,90 & 3,65 & 3,55 & 2,75 \\ \hline
+
+\end{xltabular}
+Le travail de Dobbelaere et Esmaili donne le contexte le plus utile : Kafka atteint les débits les plus élevés grâce à son modèle de journal partitionné, tandis que RabbitMQ conserve un avantage de latence pour les volumes modestes \cite{dobbelaere2017kafka}. Or notre besoin premier n'est pas la latence d'un message isolé mais la possibilité, pour plusieurs consommateurs indépendants, de lire le même topic à leur rythme, d'où la note maximale de Kafka en persistance et rejeu. RabbitMQ retire un message une fois acquitté, ce qui convient aux files de tâches mais pas à ce scénario, même si ses flux (\textit{streams}) réduisent l'écart. Pulsar, sérieux challenger, sépare serveurs et stockage : cette architecture apporte de la souplesse à grande échelle mais exige davantage de composants, ce que notre hôte ne peut se permettre. SQS, enfin, est éliminé par l'exigence de déploiement local. Le contrepoint honnête est le coût de Kafka en mémoire ; l'abandon de ZooKeeper au profit du mode KRaft, que nous utilisons, en atténue la charge.
+
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.35\textwidth]{../logo/kafka.png}
+  \caption{Logo Kafka}
+  \label{fig:Logo_Kafka}
+\end{figure}
+
+%------------------------------------------------------------------------------
+\subsection{Détection d'anomalies par apprentissage profond}
+%------------------------------------------------------------------------------
+
+\paragraph{Choix du modèle.}
+La détection par signatures ne voit que ce qu'elle connaît. Compléter Suricata par un détecteur d'anomalies, qui apprend ce qu'est un trafic normal pour repérer ce qui s'en écarte, répond à ce point aveugle \cite{chandola2009anomaly,buczak2016survey}. Cinq familles sont candidates : la forêt d'isolation \cite{liu2008isolation}, le SVM à une classe \cite{scholkopf2001ocsvm}, le \textit{Deep SVDD} \cite{ruff2018deepsvdd}, l'autoencodeur dense et l'autoencodeur variationnel récurrent (LSTM-VAE). Ce dernier associe un réseau à mémoire longue \cite{hochreiter1997lstm}, qui capte les dépendances temporelles, à un espace latent probabiliste régularisé \cite{kingma2014vae}. Park et al. l'ont introduit pour détecter des anomalies dans des séries multimodales \cite{park2018lstmvae} ; An et Cho ont montré l'intérêt d'un score fondé sur la probabilité de reconstruction plutôt que sur la seule erreur \cite{an2015vae}.
+
+Le critère le plus lourd est la modélisation temporelle : une attaque réseau se manifeste rarement par un paquet isolé mais par une \textit{séquence}, comme dans un balayage lent de ports ou une attaque par force brute. Les méthodes qui évaluent chaque vecteur indépendamment ne peuvent pas la voir.
+
+% Prérequis dans le préambule :
+% \usepackage{xltabular}
+% \usepackage{array}
+% \usepackage[table]{xcolor}
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}X|c|c|c|c|c|c|}
+
+\caption{Matrice de décision pour le modèle de détection d'anomalies}
+\label{tab:ml} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{Poids} & \textbf{Forêt d'isol.} & \textbf{SVM 1 classe} & \textbf{Deep SVDD} & \textbf{AE dense} & \textbf{LSTM-VAE} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{Poids} & \textbf{Forêt d'isol.} & \textbf{SVM 1 classe} & \textbf{Deep SVDD} & \textbf{AE dense} & \textbf{LSTM-VAE} \\ \hline
+\endhead
+
+Modélisation temporelle & 0,30 & 2 & 2 & 2 & 2 & 5 \\ \hline
+Non-linéarité, haute dimension & 0,20 & 3 & 4 & 5 & 4 & 5 \\ \hline
+Latence d'inférence & 0,20 & 5 & 3 & 4 & 5 & 4 \\ \hline
+Score exploitable et calibrable & 0,15 & 3 & 3 & 2 & 3 & 4 \\ \hline
+Maturité de l'outillage & 0,15 & 5 & 5 & 3 & 5 & 4 \\ \hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Score pondéré} & 1,00 & 3,40 & 3,20 & 3,15 & 3,60 & \textbf{4,50} \\ \hline
+
+\end{xltabular}
+Le LSTM-VAE domine surtout grâce au premier critère. La forêt d'isolation est imbattable en rapidité et en simplicité, mais elle ignore l'ordre des événements. Le SVM à une classe se heurte au coût d'entraînement et d'inférence quand les données grossissent. Le \textit{Deep SVDD} apprend une hypersphère autour des données normales sans distribution explicite, et l'on connaît le risque d'effondrement de cette hypersphère \cite{ruff2018deepsvdd}. L'autoencodeur dense est un solide second, mais son espace latent déterministe se prête moins à un seuil bien calibré. Ce choix n'est pas gratuit : le LSTM-VAE est plus difficile à expliquer qu'une forêt d'isolation. Le vote par caractéristique que nous décrirons au chapitre~3 compense en partie ce défaut en indiquant \textit{quelles} variables ont déclenché l'alerte.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.45\textwidth]{../logo/LSTM-VAE.png}
+  \caption{Modèle Deep LSTM-VAE}
+  \label{fig:Logo_lstm_vae}
+\end{figure}
+
+\paragraph{Cadre logiciel.}
+Deux bibliothèques se partagent l'apprentissage profond : TensorFlow, avec son API de haut niveau Keras \cite{abadi2016tensorflow}, et PyTorch \cite{paszke2019pytorch}. PyTorch, avec son exécution impérative, domine la recherche ; TensorFlow reste avantageux pour la mise en production, avec des graphes compilables et des formats d'export adaptés au déploiement. Notre modèle est entraîné puis chargé sous forme d'un fichier \texttt{.keras}, et la compilation du chemin d'inférence en graphe (\texttt{tf.function}) réduit la latence d'un facteur supérieur à dix par rapport à l'appel naïf, comme nous le mesurerons au chapitre~3. Les étapes classiques de prétraitement et de sélection de caractéristiques s'appuient sur scikit-learn \cite{pedregosa2011sklearn}.
+
+\paragraph{Jeu de données.}
+Le tableau~\ref{tab:datasets} compare trois jeux publics courants.
+
+% Prérequis dans le préambule :
+% \usepackage{xltabular}
+% \usepackage{array}
+% \usepackage[table]{xcolor}
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|}
+
+\caption{Comparaison des jeux de données de détection d'intrusions}
+\label{tab:datasets} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{NSL-KDD} \cite{tavallaee2009nslkdd} & \textbf{UNSW-NB15} \cite{moustafa2015unsw} & \textbf{CIC-IDS2017} \cite{sharafaldin2018cicids} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{NSL-KDD} \cite{tavallaee2009nslkdd} & \textbf{UNSW-NB15} \cite{moustafa2015unsw} & \textbf{CIC-IDS2017} \cite{sharafaldin2018cicids} \\ \hline
+\endhead
+
+Année & 2009 (dérivé de KDD'99) & 2015 & 2017 \\ \hline
+Nature du trafic & Simulé, très ancien & Synthétique (générateur IXIA), 49 caractéristiques & Capture de cinq jours, plus de 80 caractéristiques de flux \\ \hline
+Attaques & Familles obsolètes & 9 familles & Force brute, DoS/DDoS, web, botnet, infiltration, balayage de ports \\ \hline
+Exploitable en séquences (horodatage) & Non & Oui & Oui \\ \hline
+\textbf{Décision} & Écarté (obsolète) & Alternative & \textbf{Retenu} \\ \hline
+
+\end{xltabular}
+Deux atouts ont pesé : l'existence d'une journée de trafic entièrement bénin, indispensable pour entraîner un modèle non supervisé sur le seul comportement normal, et la diversité des attaques modernes. Le jeu fournit à la fois les captures brutes et des fichiers de flux \cite{cicids_page}, ce qui laisse le choix de la chaîne d'extraction des caractéristiques. Il n'est toutefois pas sans défaut : Engelen et al. ont montré que plus de 20~\% des traces du jeu d'origine contenaient des erreurs de construction des flux ou d'étiquetage \cite{engelen2021troubleshooting}, constat prolongé par Lanvin et al. \cite{lanvin2023errors}. Nous en tenons compte en complétant l'évaluation par des attaques rejouées depuis notre propre machine Kali, afin de ne pas dépendre d'un seul corpus.
+
+
+
+%------------------------------------------------------------------------------
+\subsection{IA générative, RAG et renseignement sur les menaces}
+%------------------------------------------------------------------------------
+
+\paragraph{Modèle de langage.}
+NG-IDPS emploie un LLM pour deux tâches : transformer une alerte brute en rapport d'incident lisible, et raisonner sur les renseignements de menace. Trois options se présentent (tableau~\ref{tab:llm}).
+
+% Prérequis dans le préambule :
+% \usepackage{xltabular}
+% \usepackage{array}
+% \usepackage[table]{xcolor}
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|}
+
+\caption{Comparaison des modèles de langage candidats}
+\label{tab:llm} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{GPT-4} \cite{openai2023gpt4} & \textbf{Llama 3 / 3.2} \cite{grattafiori2024llama3} & \textbf{Mistral 7B} \cite{jiang2023mistral} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{GPT-4} \cite{openai2023gpt4} & \textbf{Llama 3 / 3.2} \cite{grattafiori2024llama3} & \textbf{Mistral 7B} \cite{jiang2023mistral} \\ \hline
+\endhead
+
+Déploiement & API dans le nuage & Local & Local \\ \hline
+Données & Envoyées au fournisseur & Restent dans le périmètre & Restent dans le périmètre \\ \hline
+Coût & À l'usage & Nul (matériel existant) & Nul (matériel existant) \\ \hline
+Licence & Propriétaire & Licence communautaire Meta (ouverte, non OSI) & Apache 2.0 \\ \hline
+Adéquation à une VM sans GPU & Sans objet & Version 3B légère, exécutable sur CPU & Plus lourd sur CPU \\ \hline
+\textbf{Décision} & Écarté & \textbf{Retenu} & Alternative \\ \hline
+
+\end{xltabular}
+
+
+Le raisonnement tient en trois points. Les rapports d'incident contiennent des adresses, des charges utiles et des éléments de topologie : les envoyer à un tiers contredit le besoin BNF-9. Le coût à l'usage d'une API, ensuite, s'accorde mal avec un système qui tourne en continu. Enfin, la famille Llama offre un modèle de 3 milliards de paramètres qui reste utilisable sur CPU dans une machine virtuelle sans GPU (Llama~3.2 3B, pour le rapport d'incident), et un modèle plus grand qui profite du GPU de l'hôte (Llama~3, pour le CTI). Mistral~7B, sous licence Apache~2.0, est une alternative défendable, mais son empreinte plus forte ralentit l'inférence sur CPU. Précisons que le module de formation du Sprint~4 fait exception : il s'appuie sur l'API Gemini pour générer les contenus pédagogiques.
+
+\paragraph{Moteur d'inférence.}
+Le modèle doit être servi par un runtime. \textbf{Ollama} \cite{ollama_docs} expose une interface REST locale, gère le téléchargement et la quantification des modèles et permet d'imposer une sortie JSON, ce dont dépend le rapport à sept champs. \textbf{vLLM}, fondé sur la gestion paginée de la mémoire d'attention \cite{kwon2023vllm}, excelle en débit pour de nombreux utilisateurs concurrents mais suppose un GPU. \textbf{llama.cpp} \cite{llamacpp} est un moteur C/C++ performant sur CPU, sur lequel Ollama s'est historiquement appuyé, mais sans la couche de service. Ollama réunit donc ce dont nous avons besoin : API REST, sortie contrainte, exécution sur CPU comme sur GPU.
+
+\paragraph{Génération augmentée par récupération.}
+Un LLM seul peut inventer des règles ou des identifiants de menace. La génération augmentée par récupération (RAG) \cite{lewis2020rag} l'ancre sur des documents récupérés au préalable. Pour l'index vectoriel, FAISS \cite{johnson2021faiss} est une bibliothèque exécutée dans le processus de l'agent, sans serveur à administrer ; Milvus \cite{wang2021milvus} vise les déploiements distribués à très grande échelle, et Chroma \cite{chroma_docs} privilégie la simplicité de prise en main pour les applications LLM. Avec quelques dizaines de milliers de règles Suricata à indexer, FAISS suffit largement et n'ajoute aucun service à l'hôte. Les textes sont vectorisés avec \texttt{nomic-embed-text} \cite{nussbaum2024nomic}, disponible localement via Ollama. Enfin, la sortie du LLM lors de la génération de règles est validée par des schémas Pydantic \cite{pydantic_docs} : ce garde-fou empêche une réponse malformée d'atteindre les fichiers de règles.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.4\textwidth]{../logo/llama.png}
+  \caption{Logo Llama 3.2}
+  \label{fig:logo_llama_3.2}
+\end{figure}
+
+%------------------------------------------------------------------------------
+\subsection{Prévention et réponse automatisée}
+%------------------------------------------------------------------------------
+
+\paragraph{Pare-feu.}
+Le blocage repose sur le sous-système Netfilter du noyau Linux \cite{netfilter_docs}, accessible par \texttt{iptables} ou son successeur \texttt{nftables}. Ce dernier offre des ensembles pour des recherches plus efficaces quand la liste de blocage grossit ; sur les distributions récentes, la commande \texttt{iptables} n'est d'ailleurs souvent qu'une couche de compatibilité au-dessus de lui. Nous avons gardé \texttt{iptables} pour sa simplicité et sa présence universelle, en veillant à l'idempotence des règles (pas de doublons). \texttt{ufw}, une simple surcouche, sert au durcissement statique des machines mais pas au blocage dynamique par adresse. \texttt{fail2ban} réagit à l'analyse de fichiers de journaux : il ne sait pas consommer un score produit par un modèle. La migration vers les ensembles \texttt{nftables} est une perspective d'évolution naturelle.
+
+\paragraph{Exécution distante.}
+Le blocage doit s'exécuter sur la machine qui voit le trafic, tandis que la décision se prend ailleurs. Nous utilisons SSH \cite{ylonen2006rfc4251} avec authentification par clés, piloté depuis Python par Paramiko \cite{paramiko_docs}. Ansible \cite{ansible_docs}, sans agent et idempotent, serait le choix naturel pour de la configuration, mais le démarrage d'un \textit{playbook} se compte en secondes : incompatible avec un blocage quasi instantané.
+
+\paragraph{Orchestration.}
+Le tableau~\ref{tab:soar} compare notre orchestrateur développé sur mesure à des plateformes existantes.
+
+% Prérequis dans le préambule :
+% \usepackage{xltabular}
+% \usepackage{array}
+% \usepackage[table]{xcolor}
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|}
+
+\caption{Comparaison des approches d'orchestration SOAR}
+\label{tab:soar} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{Moteur Python sur mesure} & \textbf{Shuffle} \cite{shuffle_docs} & \textbf{TheHive + Cortex} \cite{thehive_docs} & \textbf{Splunk SOAR} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{Moteur Python sur mesure} & \textbf{Shuffle} \cite{shuffle_docs} & \textbf{TheHive + Cortex} \cite{thehive_docs} & \textbf{Splunk SOAR} \\ \hline
+\endhead
+
+Intégration à Kafka & Native (consommateur) & Par webhook ou connecteur & Par connecteur & Par connecteur \\ \hline
+Empreinte & Minimale & Conteneurs, plus lourde & JVM + base, lourde & Lourde \\ \hline
+Paliers déterministes maîtrisés & Oui, en code & Oui, via flux de travail & Orientée gestion de cas & Oui \\ \hline
+Coût & Nul & Gratuit (édition libre) & Édition gratuite limitée, sinon commerciale & Commercial \\ \hline
+Généralité et interface & Faibles & Élevées & Élevées & Élevées \\ \hline
+\textbf{Décision} & \textbf{Retenu} & Alternative & Écarté & Écarté (coût) \\ \hline
+
+\end{xltabular}
+
+
+Nous avons donc écrit notre propre moteur SOAR. Le compromis est assumé : nous perdons l'interface et la généralité d'une plateforme éprouvée, et nous héritons de leur maintenance ; en échange, l'escalade en trois paliers s'exprime en quelques dizaines de lignes lisibles, se branche directement sur Kafka et ne consomme presque rien. Pour un système dont la défense académique repose précisément sur cette logique de décision, la maîtriser de bout en bout nous a paru préférable.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.30\textwidth]{../logo/python.png}
+  \caption{Logo Python}
+  \label{fig:Logo_Python}
+\end{figure}
+
+%------------------------------------------------------------------------------
+\subsection{Serveur applicatif et communication temps réel}
+%------------------------------------------------------------------------------
+
+Le serveur applicatif consomme les événements Kafka, sert l'API, persiste les incidents et diffuse les alertes aux navigateurs. Le tableau~\ref{tab:backend} compare trois piles.
+
+% Prérequis dans le préambule :
+% \usepackage{xltabular}
+% \usepackage{array}
+% \usepackage[table]{xcolor}
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|}
+
+\caption{Comparaison des piles serveur}
+\label{tab:backend} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{Node.js + Express} \cite{tilkov2010node} & \textbf{Django} \cite{django_docs} & \textbf{FastAPI} \cite{fastapi_docs} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{Node.js + Express} \cite{tilkov2010node} & \textbf{Django} \cite{django_docs} & \textbf{FastAPI} \cite{fastapi_docs} \\ \hline
+\endhead
+
+Modèle d'exécution & Événementiel, non bloquant & Synchrone, asynchrone partiel & Asynchrone (ASGI) \\ \hline
+Temps réel bidirectionnel & Socket.io natif & Nécessite Channels & WebSocket, sans reconnexion \\ \hline
+Client Kafka & KafkaJS & Bibliothèques Python & Bibliothèques Python \\ \hline
+Cohérence avec l'interface & Même langage (JS/TS) & Langage différent & Langage différent \\ \hline
+\textbf{Décision} & \textbf{Retenu} & Écarté & Alternative \\ \hline
+
+\end{xltabular}
+
+
+Tilkov et Vinoski ont montré que le modèle événementiel de Node.js convient aux applications à nombreuses connexions simultanées, ce qui décrit un tableau de bord SOC à plusieurs analystes \cite{tilkov2010node}. Django serait plus à l'aise pour un site classique que pour un flux d'événements permanent. FastAPI est un candidat sérieux, mais partager un langage avec l'interface (TypeScript) réduit la charge cognitive d'un projet mené seul.
+
+Pour l'échange temps réel lui-même, trois mécanismes existent. Les évènements envoyés par le serveur (SSE) sont unidirectionnels : ils ne peuvent pas transporter la commande \texttt{send\_command} de l'administrateur vers le serveur. Le protocole WebSocket standard \cite{fette2011rfc6455} autorise l'échange dans les deux sens, mais laisse à l'application la gestion des reconnexions et des salons. Socket.io \cite{socketio_docs} ajoute ces mécanismes, plus un repli automatique en cas de proxy hostile. Il est retenu, et ses trois évènements (\texttt{soar\_incident\_incoming}, \texttt{soar\_incident\_updated}, \texttt{send\_command}) forment un contrat stable entre serveur et interface.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.4\textwidth]{../logo/nodejsExpress.png}
+  \caption{Logo NodeJS - Express}
+  \label{fig:Logo_Nodejs_Express}
+\end{figure}
+
+
+%------------------------------------------------------------------------------
+\subsection{Interface de supervision}
+%------------------------------------------------------------------------------
+
+L'interface doit rester fluide malgré l'arrivée continue d'alertes, et son apparence compte : un analyste qui surveille un écran de nuit a besoin de contraste et de hiérarchie visuelle.
+
+% Prérequis dans le préambule :
+% \usepackage{xltabular}
+% \usepackage{array}
+% \usepackage[table]{xcolor}
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|}
+
+\caption{Comparaison des cadres d'interface}
+\label{tab:frontend} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{Next.js (React)} \cite{nextjs_docs} & \textbf{Vue / Nuxt} \cite{vue_docs} & \textbf{Angular} \cite{angular_docs} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{Next.js (React)} \cite{nextjs_docs} & \textbf{Vue / Nuxt} \cite{vue_docs} & \textbf{Angular} \cite{angular_docs} \\ \hline
+\endhead
+
+Rendu & Serveur (SSR) et client & Serveur et client & Client, serveur en option \\ \hline
+Routage & Par fichiers & Par fichiers (Nuxt) & Configuration explicite \\ \hline
+Typage & TypeScript courant & TypeScript pris en charge & TypeScript imposé \\ \hline
+Écosystème de composants & Très vaste & Vaste & Complet, plus rigide \\ \hline
+Courbe d'apprentissage & Modérée & Douce & Raide \\ \hline
+\textbf{Décision} & \textbf{Retenu} & Alternative & Écarté \\ \hline
+
+\end{xltabular}
+
+
+Next.js s'impose par son routage par fichiers, son typage TypeScript et un écosystème de composants qui nous permet d'assembler un tableau de bord sans réinventer chaque élément. Angular impose un cadre plus rigide, disproportionné pour l'application visée. Pour le style, Tailwind CSS \cite{tailwind_docs} convient à une identité visuelle sur mesure (thème sombre, effet de verre dépoli) là où Bootstrap ou une bibliothèque de composants imposeraient leur propre esthétique.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.4\textwidth]{../logo/Nextjs.png}
+  \caption{Logo NextJS}
+  \label{fig:Logo_Nextjs}
+\end{figure}
+
+%------------------------------------------------------------------------------
+\subsection{Persistance des données}
+%------------------------------------------------------------------------------
+
+Deux besoins de stockage cohabitent. Les incidents sont des documents JSON semi-structurés, dont le contenu varie selon l'attaque et dont le schéma évolue au fil des sprints ; les indicateurs de compromission de l'agent CTI sont des enregistrements simples à recherche exacte. Cattell \cite{cattell2011sql} montre que le choix entre stockages relationnels et NoSQL dépend de la forme des données et de leur évolution, plus que d'une supériorité absolue.
+
+% Prérequis dans le préambule :
+% \usepackage{xltabular}
+% \usepackage{array}
+% \usepackage[table]{xcolor}
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|}
+
+\caption{Comparaison des solutions de persistance}
+\label{tab:db} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{MongoDB} \cite{mongodb_docs} & \textbf{PostgreSQL} \cite{postgres_docs} & \textbf{SQLite} \cite{sqlite_docs} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{MongoDB} \cite{mongodb_docs} & \textbf{PostgreSQL} \cite{postgres_docs} & \textbf{SQLite} \cite{sqlite_docs} \\ \hline
+\endhead
+
+Modèle & Documents JSON & Relationnel (JSON possible) & Relationnel embarqué \\ \hline
+Évolution du schéma & Souple & Migrations nécessaires & Migrations nécessaires \\ \hline
+Déploiement & Service local & Service local & Fichier, sans serveur \\ \hline
+Rôle dans NG-IDPS & Incidents, enregistrements de formation & Non retenu & Mémoire locale des indicateurs CTI \\ \hline
+
+\end{xltabular}
+
+
+MongoDB est retenu pour les incidents : le rapport à sept champs est déjà un document, et le pilote Node.js le manipule sans transformation. PostgreSQL et son type JSONB auraient fonctionné ; nous ne prétendons pas qu'il y ait ici une supériorité technique franche. La souplesse du schéma et la continuité avec la pile Node.js ont fait pencher la balance, et le déploiement en local restreint la surface d'attaque. SQLite, lui, ne sert qu'à l'agent CTI : sans serveur ni administration, il répond aux recherches exactes d'indicateurs et complète l'index sémantique FAISS.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.4\textwidth]{../logo/mongodb.png}
+  \caption{Logo Mongo BD}
+  \label{fig:Logo_Mongo_db}
+\end{figure}
+
+
+%------------------------------------------------------------------------------
+\subsection{Gestion de projet, modélisation et rédaction}
+%------------------------------------------------------------------------------
+
+Le tableau~\ref{tab:outils} regroupe les outils transverses, dont le choix a moins d'enjeu technique mais pèse sur la conduite du projet.
+
+% Prérequis dans le préambule :
+% \usepackage{xltabular}
+% \usepackage{array}
+% \usepackage[table]{xcolor}
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|}
+
+\caption{Outils de gestion de projet, de modélisation et de rédaction}
+\label{tab:outils} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Usage} & \textbf{Retenu} & \textbf{Alternatives} & \textbf{Raison} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Usage} & \textbf{Retenu} & \textbf{Alternatives} & \textbf{Raison} \\ \hline
+\endhead
+
+Suivi du backlog & GitHub Projects \cite{github_projects} & Jira, Trello & Lié aux dépôts et aux tickets, gratuit \\ \hline
+Modélisation & PlantUML, Mermaid & Outils graphiques & Diagrammes sous forme de texte, versionnables \\ \hline
+Rédaction & LaTeX (Overleaf) et BibTeX & Traitement de texte & Équations, références et numérotation automatisées \\ \hline
+
+\end{xltabular}
+
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.4\textwidth]{../logo/github.png}
+  \caption{Logo Github}
+  \label{fig:Logo_Github}
+\end{figure}
+
+%------------------------------------------------------------------------------
+\subsection{Synthèse de la pile technologique}
+%------------------------------------------------------------------------------
+
+Le tableau~\ref{tab:synthese} récapitule la pile retenue et rappelle sur quel nœud chaque brique est déployée.
+
+% Prérequis dans le préambule :
+% \usepackage{xltabular}
+% \usepackage{array}
+% \usepackage[table]{xcolor}
+
+\begingroup
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|l|>{\raggedright\arraybackslash}X|l|l|}
+
+\caption{Synthèse de la pile technologique de NG-IDPS}
+\label{tab:synthese} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Couche} & \textbf{Technologie retenue} & \textbf{Version} & \textbf{Nœud} \\ \hline
+\endfirsthead
+
+% En-tête pour les pages suivantes (si le tableau est coupé)
+\multicolumn{4}{c}{\tablename\ \thetable{} -- suite de la page précédente} \\
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Couche} & \textbf{Technologie retenue} & \textbf{Version} & \textbf{Nœud} \\ \hline
+\endhead
+
+% Pied de page pour les pages intermédiaires
+\hline
+\multicolumn{4}{r}{\small\textit{Suite à la page suivante...}} \\
+\endfoot
+
+% Pied de page final (à la toute fin du tableau)
+\endlastfoot
+
+Virtualisation & VMware Workstation, Ubuntu Server LTS & --- & Hôte \\ \hline
+Détection par signatures & Suricata & 8.0.6 & VM-Edge \\ \hline
+Journaux bruts & Filebeat, Logstash, Elasticsearch, Kibana & 8.x & VM-Edge / VM-ML \\ \hline
+Transport & Apache Kafka (mode KRaft) & 4.3.1 & VM-ML \\ \hline
+Détection d'anomalies & LSTM-VAE (TensorFlow, Keras, scikit-learn) & TF 2.21.0, Keras 3.15.0 & VM-ML \\ \hline
+LLM et RAG & Ollama, Llama 3.2 3B, Llama 3, FAISS, nomic-embed-text, Pydantic & --- & VM-Response / Hôte \\ \hline
+Réponse & Moteur SOAR Python, SSH (Paramiko), iptables & Python 3.12 & VM-ML / VM-Response \\ \hline
+Serveur & Node.js, Express, Socket.io, KafkaJS, Nodemailer & --- & Hôte \\ \hline
+Interface & Next.js, TypeScript, Tailwind CSS & --- & Hôte \\ \hline
+Persistance & MongoDB, SQLite & --- & Hôte / VM-Response \\ \hline
+
+\end{xltabular}
+\endgroup
+
+%==============================================================================
+\section{Architecture générale}
+\label{sec:archi}
+%==============================================================================
+
+NG-IDPS est un système distribué, événementiel et faiblement couplé : ses composants ne s'appellent jamais directement, ils échangent des messages sur des topics Kafka. La figure~\ref{fig:archi} en donne la vue de déploiement, avec quatre machines virtuelles et l'hôte physique.
+
+\begin{itemize}
+\item \textbf{VM-Edge} (\texttt{192.168.56.128}) héberge la sonde Suricata, Filebeat et le collecteur \texttt{edge\_collector.py} qui extrait les 16 caractéristiques. C'est aussi la cible du blocage.
+\item \textbf{VM-ML} (\texttt{192.168.56.130}) porte le broker Kafka, la pile ELK, l'inférence LSTM-VAE (\texttt{realtime\_interface.py}) et le moteur de corrélation et de décision \texttt{soar.py}.
+\item \textbf{VM-Response} (\texttt{192.168.56.140}) exécute les agents : analyse post-attaque (\texttt{agent\_ia.py}), renseignement (\texttt{agent\_cti.py}) et exécution du blocage par SSH (\texttt{agent\_soar.py}). Elle a été séparée de VM-ML parce que Ollama saturait la mémoire de cette dernière.
+\item \textbf{VM-Kali} (\texttt{192.168.56.150}) simule l'attaquant.
+\item \textbf{L'hôte Windows} fait tourner le serveur \texttt{server.js}, MongoDB, le tableau de bord Next.js et Ollama avec le modèle Llama~3 accéléré par GPU.
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[>=Stealth, font=\scriptsize,
+  vm/.style={draw=black!70, thick, rounded corners=4pt, fill=gray!6},
+  comp/.style={draw=black!60, rounded corners=2pt, fill=white, align=center,
+               minimum width=4.0cm, minimum height=0.7cm, inner sep=2pt},
+  flow/.style={->, thick, draw=cyan!60!black},
+  ctrl/.style={->, thick, dashed, draw=red!70!black},
+  lbl/.style={fill=white, inner sep=1pt, font=\scriptsize}]
+
+  % VM-Edge
+  \draw[vm] (0,3.1) rectangle (4.6,8.3);
+  \node[font=\footnotesize\bfseries] at (2.3,7.9) {VM-Edge (.128)};
+  \node[comp] (sur) at (2.3,7.2) {Suricata (IDS)};
+  \node[comp] (fb)  at (2.3,6.3) {Filebeat};
+  \node[comp] (ec)  at (2.3,5.3) {\texttt{edge\_collector.py}\\16 caractéristiques};
+  \node[comp] (ipt) at (2.3,3.7) {iptables (cible du blocage)};
+  \draw[flow] (sur) -- (fb);
+
+  % VM-ML
+  \draw[vm] (6.4,3.1) rectangle (11.0,8.3);
+  \node[font=\footnotesize\bfseries] at (8.7,7.9) {VM-ML (.130)};
+  \node[comp] (kafka) at (8.7,7.2) {Broker Apache Kafka};
+  \node[comp] (elk)   at (8.7,6.3) {Logstash, Elasticsearch, Kibana};
+  \node[comp] (rt)    at (8.7,5.3) {\texttt{realtime\_interface.py}\\LSTM-VAE};
+  \node[comp] (soar)  at (8.7,3.7) {\texttt{soar.py} (corrélation, décision)};
+
+  % VM-Response
+  \draw[vm] (12.8,4.5) rectangle (17.4,8.3);
+  \node[font=\footnotesize\bfseries] at (15.1,7.9) {VM-Response (.140)};
+  \node[comp] (ia)    at (15.1,7.2) {\texttt{agent\_ia.py}\\Ollama llama3.2:3b};
+  \node[comp] (cti)   at (15.1,6.2) {\texttt{agent\_cti.py}\\FAISS, SQLite};
+  \node[comp] (asoar) at (15.1,5.2) {\texttt{agent\_soar.py} (SSH)};
+
+  % Kali
+  \node[comp, minimum width=3.6cm] (kali) at (1.6,10.4) {VM-Kali (.150)\\simulation d'attaques};
+
+  % Hôte
+  \draw[vm, fill=blue!4] (0,-3.1) rectangle (17.4,1.3);
+  \node[font=\footnotesize\bfseries] at (8.7,0.95) {Hôte Windows (GPU RTX 3050, 24 Go de RAM)};
+  \node[comp, minimum width=3cm] (mongo) at (2.8,-0.3) {MongoDB};
+  \node[comp, minimum width=5cm, minimum height=1.0cm] (srv) at (8.7,-0.3)
+        {\texttt{server.js}\\Express, Socket.io, KafkaJS, Nodemailer};
+  \node[comp] (llm)  at (15.1,-0.3) {Ollama llama3 (GPU)};
+  \node[comp] (dash) at (8.7,-2.2) {Tableau de bord Next.js};
+
+  % Flux de données
+\draw[flow] (kali.south) -- (1.6,8.3) node[pos=0.5, left, lbl] {trafic malveillant};
+\draw[flow] (ec.east) -- (rt.west) node[midway, above, lbl] {network-features};
+\draw[flow] (fb.east) -- (elk.west) node[midway, above, lbl] {eve.json};
+\draw[flow] (rt.south) -- (soar.north) node[midway, right, lbl] {ml-alerts};
+\draw[flow] (ec.south) .. controls (4.5,4.0) and (6.5,4.0) .. (soar.west) node[pos=0.5, below, lbl] {suricata-alerts};
+\draw[flow] (soar.east) -- (ia.west) node[pos=0.55, lbl] {alerts-for-llm};
+\draw[flow] (14.0,4.5) -- (10.3,0.2) node[pos=0.5, right, lbl] {incident-reports};
+\draw[ctrl] (7.9,0.2) -- (15.1,0.2) -- (asoar.south) node[pos=0.3, below, lbl] {Socket.IO : execute\_command};
+\draw[flow] (mongo.east) -- (srv.west) node[midway, above, lbl] {persistance};
+\draw[flow, <->] (srv.south) -- (dash.north) node[midway, right, lbl] {Socket.io};
+\draw[flow, <->] (15.1,4.5) -- (llm.north) node[midway, right, lbl] {REST :11434};
+\draw[ctrl] (16.6,8.3) -- (16.6,9.3) -- (3.6,9.3) -- (3.6,8.3);
+\node[lbl, above] at (10.1,9.3) {SSH : iptables DROP (\texttt{soar.py}, autonome)};
+\end{tikzpicture}}
+
+\caption{Architecture de déploiement de NG-IDPS}
+\label{fig:archi}
+\end{figure}
+
+Les échanges reposent sur cinq topics Kafka (tableau~\ref{tab:topics}).
+
+% Prérequis dans le préambule :
+% \usepackage{xltabular}
+% \usepackage{array}
+% \usepackage[table]{xcolor}
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|}
+
+\caption{Topics Kafka de NG-IDPS}
+\label{tab:topics} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Topic} & \textbf{Producteur} & \textbf{Consommateur} & \textbf{Contenu} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Topic} & \textbf{Producteur} & \textbf{Consommateur} & \textbf{Contenu} \\ \hline
+\endhead
+
+\texttt{network-features} & \texttt{edge\_collector.py} & \texttt{realtime\_interface.py} & 16 caractéristiques \\ \hline
+\texttt{ml-alerts} & \texttt{realtime\_interface.py} & \texttt{soar.py} & Anomalie ML confirmée \\ \hline
+\texttt{suricata-alerts} & \texttt{edge\_collector.py} (relai des alertes Suricata) & \texttt{soar.py} & Alerte par signature \\ \hline
+\texttt{alerts-for-llm} & \texttt{soar.py} & \texttt{agent\_ia.py}, \texttt{server.js} & Alerte corrélée à analyser / à afficher \\ \hline
+\texttt{incident-reports} & \texttt{agent\_ia.py}, \texttt{soar.py} (bypass Zero Trust) & \texttt{server.js} & Rapport structuré ou alerte de contournement \\ \hline
+
+\end{xltabular}
+
+
+Le parcours d'un incident, de la sonde à l'écran, se déroule en sept étapes.
+
+\begin{enumerate}
+\item Suricata inspecte le trafic ; ses journaux partent vers la voie froide (ELK) pendant que \texttt{edge\_collector.py} extrait les caractéristiques (publiées sur \texttt{network-features}) et relaie les alertes par signature sur \texttt{suricata-alerts}.
+\item \texttt{realtime\_interface.py} construit des fenêtres de 10 pas de temps, calcule l'erreur de reconstruction du LSTM-VAE, applique les filtres (persistance, liste blanche, bouclier anti-DDoS) et publie une anomalie confirmée sur \texttt{ml-alerts}.
+\item \texttt{soar.py} consomme en parallèle \texttt{ml-alerts} et \texttt{suricata-alerts}, déduplique et corrèle les alertes sur une fenêtre de 30~s, puis décide en autonomie complète : en cas de corrélation forte ou de signature critique, il déclenche aussitôt le blocage en appliquant lui-même, par SSH, la règle \texttt{iptables} sur VM-Edge.
+\item L'alerte est relayée sur \texttt{alerts-for-llm} ; \texttt{agent\_ia.py} interroge Ollama, obtient le rapport à sept champs (ou un rapport de repli) et le publie sur \texttt{incident-reports}.
+\item \texttt{server.js} persiste l'incident dans MongoDB et le diffuse au tableau de bord par Socket.io ; si aucun analyste n'est connecté, un courriel est envoyé.
+\item Un administrateur connecté peut confirmer ou annuler manuellement une action via l'événement Socket.IO \texttt{execute\_command}, relayé à \texttt{agent\_soar.py} sur VM-Response, qui exécute la commande par SSH et renvoie un accusé \texttt{command\_result}.
+\item En l'absence prolongée d'analyste, le mode Auto-Pilote emprunte ce même canal Socket.IO vers \texttt{agent\_soar.py} pour appliquer le blocage sans attendre une validation humaine.
+\end{enumerate}
+
+L'escalade en trois paliers qui structure les étapes~3, 6 et 7 (blocage autonome immédiat par \texttt{soar.py}, confirmation manuelle, mode Auto-Pilote) sera détaillée au chapitre~4, avec ses seuils. Une distinction architecturale importante y est développée~: la décision autonome (\texttt{soar.py}, déclenchée par Kafka) est séparée de l'exécution supervisée par un humain (\texttt{agent\_soar.py}, déclenchée par Socket.IO), ces deux composants ne communiquant jamais directement entre eux.
+
+%==============================================================================
+\section{Conclusion}
+%==============================================================================
+
+Ce chapitre a posé les fondations du projet. L'analyse des besoins a identifié cinq acteurs, vingt et un besoins fonctionnels et neuf besoins non fonctionnels mesurables, traduits en seize récits utilisateur répartis sur six sprints. La comparaison des technologies a permis de justifier la pile retenue, en appliquant une matrice pondérée aux trois décisions les plus structurantes (Suricata, Kafka, LSTM-VAE) et une analyse qualitative aux autres ; elle a aussi mis en lumière des contreparties assumées, comme l'empreinte mémoire de Kafka et d'ELK ou l'obligation de maintenir notre propre moteur SOAR. Enfin, l'architecture de déploiement et le parcours d'un incident donnent le cadre dans lequel s'inscrivent les deux chapitres suivants. Le chapitre~3 aborde la Release~1 : la mise en place de l'ingestion parallèle et du moteur de détection.

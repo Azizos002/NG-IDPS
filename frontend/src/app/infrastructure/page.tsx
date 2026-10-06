@@ -33,38 +33,40 @@ export default function InfrastructurePage() {
         {
             id: 1,
             hostname: "VM-Capteur-Suricata",
-            ip: "192.168.56.10",
+            ip: "192.168.56.128",
             status: "Hors Ligne",
             cpu: 0,
             ram: 0,
             services: [
                 { name: "Suricata (NIDS)", backendName: "suricata", active: false },
-                { name: "Filebeat (Shipper)", backendName: "filebeat", active: false }
+                { name: "Filebeat (Shipper)", backendName: "filebeat", active: false },
+                { name: "Edge Collector", backendName: "edge_collector.py", active: false }
             ]
         },
         {
             id: 2,
             hostname: "ML",
-            ip: "192.168.56.20", 
+            ip: "192.168.56.130",
             status: "Hors Ligne",
-            cpu: 0, 
+            cpu: 0,
             ram: 0,
             services: [
                 { name: "Kafka (Ingestion)", backendName: "kafka", active: false },
                 { name: "Elasticsearch", backendName: "elasticsearch", active: false },
-                { name: "Modèle LSTM-VAE", backendName: "modele_lstm.py", active: false } 
+                { name: "Modèle LSTM-VAE", backendName: "realtime_interface_demo.py", active: false },
+                { name: "SOAR", backendName: "soar.py", active: false },
             ]
         },
         {
             id: 3,
             hostname: "VM-Response",
-            ip: "192.168.56.30",
+            ip: "192.168.56.140",
             status: "Hors Ligne",
-            cpu: 0, 
+            cpu: 0,
             ram: 0,
             services: [
-                { name: "Ollama (Moteur LLM)", backendName: "ollama", active: false },
-                { name: "Agent SOAR", backendName: "agent_soar.py", active: false }
+                { name: "Agent SOAR", backendName: "agent_soar.py", active: false },
+                { name: "Agent Rapport (Post-Incident)", backendName: "agent_ia.py", active: false }
             ]
         }
     ]);
@@ -88,7 +90,7 @@ export default function InfrastructurePage() {
             try {
                 const response = await fetch(`${backendUrl}/api/vms`);
                 const dbVms = await response.json();
-                
+
                 setVms(prevVms => prevVms.map(vm => {
                     const knownVm = dbVms.find((db: any) => db.hostname === vm.hostname);
                     if (knownVm) {
@@ -137,7 +139,7 @@ export default function InfrastructurePage() {
                     const totalRam = activeVms.reduce((acc, curr) => acc + curr.ram, 0);
                     const avgCpu = Math.round(totalCpu / activeVms.length);
                     const avgRam = Math.round(totalRam / activeVms.length);
-                    
+
                     const now = new Date();
                     const timeString = `${now.getHours()}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
 
@@ -151,6 +153,10 @@ export default function InfrastructurePage() {
                 return newVms;
             });
         });
+
+        return () => {
+            socket.disconnect();
+        };
 
     }, []);
 
@@ -175,7 +181,7 @@ export default function InfrastructurePage() {
                                 <p className="text-sm font-mono text-slate-500">{vm.ip}</p>
                             </div>
                             <div className={`px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-2 ${vm.status === "Online" ? "bg-green-500/10 text-green-400 border border-green-500/20" :
-                                    "bg-red-500/10 text-red-400 border border-red-500/20"
+                                "bg-red-500/10 text-red-400 border border-red-500/20"
                                 }`}>
                                 {vm.status === "Online" ? <CheckCircle2 size={14} /> : <AlertCircle size={14} className="animate-pulse" />}
                                 {vm.status}

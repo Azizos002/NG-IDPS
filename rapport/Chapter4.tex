@@ -1,0 +1,854 @@
+% ==============================================================================
+% CHAPITRE 4 : DÉPLOIEMENT DU PÔLE PRÉVENTION ET ORCHESTRATION SOAR (RELEASE 2)
+% ==============================================================================
+
+\chapter{Prévention, SOAR, agents IA et dashboard SOC (Release 2)}
+\label{chap:release2}
+
+\minitoc
+\newpage
+
+%========================================
+\section{Introduction}
+%========================================
+La première release a livré la couche d'interception et de détection : la sonde \ac{IDS} Suricata, le bus \ac{Kafka} et le moteur d'inférence \ac{LSTMVAE} (chapitre~\ref{chap:release1}). Ce chapitre présente la seconde release, qui transforme cette capacité de détection en une capacité de \emph{prévention} et de \emph{réponse autonome} : anticipation des menaces par renseignement, mitigation du risque humain, et pilotage centralisé du \ac{SOC} par une orchestration \ac{SOAR} multi-paliers.
+
+Il convient de préciser d'emblée le périmètre du \ac{SOAR} dans NG-IDPS~: il ne s'agit pas d'un composant de détection, mais d'un moteur de \emph{corrélation, décision et remédiation} qui consomme les verdicts produits par la release~1 (Suricata, \ac{LSTMVAE}) pour décider d'une action (journalisation, notification, blocage) et l'exécuter physiquement sur l'infrastructure.
+
+La release~2 est organisée en trois sprints, numérotés dans la continuité de la release~1 et résumés dans le tableau~\ref{tab:r2-sprints}. Chaque sprint est présenté selon la même démarche~: backlog, analyse, conception, réalisation et validation.
+
+% Prérequis dans le préambule :
+% \usepackage{xltabular}
+% \usepackage{array}
+% \usepackage[table]{xcolor}
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|l|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|}
+
+\caption{Répartition des sprints de la release~2.}
+\label{tab:r2-sprints} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Sprint} & \textbf{Intitulé} & \textbf{Livrable majeur} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Sprint} & \textbf{Intitulé} & \textbf{Livrable majeur} \\ \hline
+\endhead
+
+Sprint 4 & Anticipation par le renseignement (agent \ac{CTI} et triage \emph{Dual-RAG}) & Génération automatique de règles Suricata et aiguillage vers la sensibilisation \\ \hline
+Sprint 5 & Mitigation du risque humain (agent Gemini et \ac{RAG} \ac{LMS}) & Plateforme de sensibilisation ciblée post-incident \\ \hline
+Sprint 6 & Orchestration \ac{SOAR} multi-paliers, agent post-attaque et dashboard SOC & Boucle de réponse fermée et supervision temps réel \\ \hline
+
+\end{xltabular}
+
+%==============================================================================
+\section{Sprint 4 : Anticipation par le renseignement (agent CTI et triage Dual-RAG)}\label{sec:sprint4}
+%==============================================================================
+Ce premier sprint de la release~2 vise à automatiser la veille \ac{OSINT} et la production de règles de détection préventives, afin de réduire la fenêtre d'exposition entre la publication d'une menace et sa détection par Suricata. L'agent réalisé assure en outre un \emph{triage} de chaque article ingéré, aiguillant les menaces techniques vers la génération de règles et les contenus de sensibilisation vers le pipeline de formation du sprint~5.
+
+\subsection{Backlog du sprint 4}
+Le backlog ci-dessous regroupe les user stories retenues pour ce sprint, priorisées selon leur contribution à la chaîne de triage et de génération de règles (tableau~\ref{tab:backlog-s4}).
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|l|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|c|}
+
+\caption{Backlog du sprint 4.}
+\label{tab:backlog-s4} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{ID} & \textbf{User story} & \textbf{Critère d'acceptation} & \textbf{Priorité} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{ID} & \textbf{User story} & \textbf{Critère d'acceptation} & \textbf{Priorité} \\ \hline
+\endhead
+
+US4.1 & En tant qu'analyste SOC, je veux que chaque article \ac{OSINT} ingéré soit classé automatiquement en \emph{menace technique}, \emph{sensibilisation} ou \emph{bruit}, afin de router le contenu vers le bon pipeline. & Chaque article reçoit un \texttt{type\_article} parmi \texttt{TECHNICAL\_THREAT}, \texttt{AWARENESS}, \texttt{NOISE}. & Haute \\ \hline
+US4.2 & En tant qu'analyste, je veux que les menaces soient vectorisées (\texttt{nomic-embed-text}) afin de les comparer à l'historique et aux règles existantes. & Chaque article est converti en vecteur et comparé par recherche sémantique. & Haute \\ \hline
+US4.3 & En tant qu'analyste, je veux une recherche de similitude sur l'index \ac{FAISS} des règles Suricata de référence afin d'éviter les doublons et de contextualiser la menace. & Les $k$ règles de référence les plus proches sont injectées dans le contexte du \ac{LLM}. & Haute \\ \hline
+US4.4 & En tant qu'analyste, je veux qu'une règle Suricata candidate soit générée localement par \texttt{llama3.2:3b} pour toute menace technique non couverte. & Une règle candidate est produite et associée à l'article. & Haute \\ \hline
+US4.5 & En tant que responsable sécurité, je veux que la sortie du \ac{LLM} soit validée par un schéma Pydantic~v2 (score de fiabilité, \ac{IoC}s, règle) afin de garantir sa conformité avant toute publication. & Toute sortie non conforme (\emph{ex.} contenu publicitaire classé \texttt{NOISE}) est rejetée et journalisée. & Haute \\ \hline
+US4.6 & En tant que responsable sécurité, je veux qu'une règle validée soit persistée avec un statut \texttt{PENDING} afin qu'un administrateur puisse l'approuver avant déploiement. & La règle est visible sur le dashboard avec son statut. & Moyenne \\ \hline
+
+\end{xltabular}
+
+\subsection{Analyse}
+Cette section présente l'architecture fonctionnelle du sprint puis ses cas d'utilisation.
+
+\subsubsection{Architecture du sprint}
+L'agent \ac{CTI} (\texttt{agent\_cti.py}) s'exécute sur \texttt{vm-response} et s'appuie exclusivement sur l'inférence locale \ac{Ollama} (\texttt{llama3.2:3b} pour la génération, \texttt{nomic-embed-text} pour les embeddings), ce qui préserve la confidentialité des données de renseignement en évitant tout appel à un fournisseur \ac{LLM} externe pour ce sprint. La figure~\ref{fig:archy_sprint4} illustre ses interactions avec les bases vectorielles, le \ac{LLM} local, l'\ac{API} du backend et la sonde Suricata.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{../diagrams/archy_sprint4.png}
+    \caption{Architecture du sprint 4}
+    \label{fig:archy_sprint4}
+\end{figure}
+
+Le pipeline \emph{Dual-RAG} repose sur deux volets de récupération complémentaires et indépendants~: la mémoire épisodique des menaces déjà traitées (\texttt{core\_memory.py}, recherche sémantique sur les incidents passés) et l'index des règles Suricata de référence (\ac{FAISS} + \ac{SQLite}, \texttt{rag\_suricata.index}/\texttt{rag\_suricata.sqlite}), tous deux interrogés avant la génération~\cite{lewis2020rag}. Les sources \ac{OSINT} elles-mêmes sont hétérogènes~: flux \ac{RSS} classiques (\texttt{feedparser}) et flux \ac{JSON}/\ac{API} propriétaires, toutes deux administrables dynamiquement depuis le dashboard.
+
+\subsubsection{Diagramme de cas d'utilisation}
+Le diagramme de la figure~\ref{fig:Diagramme_de_cas_utilisation_sprint4} identifie les acteurs et les cas d'utilisation couverts par le sprint.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{../diagrams/uc_sprint4.png}
+    \caption{Diagramme de cas d'utilisation du sprint 4}
+    \label{fig:Diagramme_de_cas_utilisation_sprint4}
+    
+\end{figure}
+
+\subsubsection{Description textuelle des cas d'utilisation}
+Le cas d'utilisation central, « Trier et traiter un article de renseignement », est décrit dans le tableau~\ref{tab:uc-s4}.
+
+% Prérequis dans le préambule :
+% \usepackage{xltabular}
+% \usepackage{array}
+% \usepackage[table]{xcolor}
+% \usepackage{enumitem} % pour [nosep,leftmargin=*]
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|l|>{\raggedright\arraybackslash}X|}
+
+\caption{Description textuelle du cas d'utilisation « Trier et traiter un article de renseignement ».}
+\label{tab:uc-s4} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Cas d'utilisation} & \textbf{Trier et traiter un article de renseignement} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Cas d'utilisation} & \textbf{Trier et traiter un article de renseignement} \\ \hline
+\endhead
+
+\textbf{Acteurs} & Agent CTI (principal), analyste SOC (secondaire), sonde Suricata (système externe) \\ \hline
+\textbf{Pré-conditions} & Ollama actif ; index FAISS et bases SQLite chargés ; au moins une source OSINT active. \\ \hline
+\textbf{Scénario nominal} &
+\begin{enumerate}[nosep,leftmargin=*]
+\item L'agent interroge le backend pour récupérer les sources OSINT actives.
+\item Pour chaque source, il ingère les articles non encore traités (déduplication par lien/identifiant).
+\item Il vectorise chaque article (\texttt{nomic-embed-text}) et interroge la mémoire épisodique et l'index FAISS.
+\item Il demande à \texttt{llama3.2:3b} un triage strict au format JSON (type, titre, résumé, IoCs, règle, score de fiabilité).
+\item La sortie est validée par le schéma Pydantic~v2.
+\item Selon le \texttt{type\_article}~: une règle candidate (\texttt{TECHNICAL\_THREAT}) ou un contenu de sensibilisation (\texttt{AWARENESS}) est persisté en base avec le statut initial correspondant.
+\item L'article est mémorisé dans la base vectorielle épisodique pour enrichir les triages futurs.
+\end{enumerate} \\ \hline
+\textbf{Scénarios alternatifs} & (A1) Article déjà traité (lien connu) : ignoré sans appel au LLM. (A2) Sortie classée \texttt{NOISE} (contenu publicitaire/hors-périmètre) : rejet par le validateur Pydantic, aucune persistance. (A3) Sortie non conforme au schéma : rejet et journalisation (\texttt{ValidationError}). (A4) Source inaccessible ou type non reconnu : source ignorée pour le cycle courant. \\ \hline
+\textbf{Post-conditions} & Un article est persisté en base avec un statut \texttt{PENDING} (menace technique) ou \texttt{PENDING\_FORMATION} (sensibilisation), ou rejeté sans effet de bord. \\ \hline
+
+\end{xltabular}
+
+\subsection{Conception}
+Cette section détaille la dynamique du pipeline puis son modèle de données.
+
+\subsubsection{Diagramme de séquence}
+La figure~\ref{fig:diag_seq_sprint4} décrit l'enchaînement des appels, de la collecte \ac{OSINT} jusqu'à la persistance de l'article trié.
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{../diagrams/seq_sprint4.png}
+    \caption{Diagramme de séquence "triage et validation d'un article par l'agent CTI"}
+    \label{fig:diag_seq_sprint4}
+\end{figure}
+
+\subsubsection{Diagramme de classes}
+Les objets manipulés par l'agent, notamment le schéma de validation Pydantic \texttt{CTIActualitySchema}, sont présentés en figure~\ref{fig:diag_classe_sprint4}.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{../diagrams/Diag_classe_sprint4.png}
+    \caption{Diagramme de classes du sprint 4}
+    \label{fig:diag_classe_sprint4}
+\end{figure}
+
+
+\subsection{Réalisation}
+Cette section présente l'implémentation des composants et les interfaces obtenues.
+
+\subsubsection{Environnement et composants}
+Les composants du sprint sont regroupés dans \texttt{vm-response/} : \texttt{agent\_cti.py} (orchestration du triage), \texttt{core\_memory.py} (mémoire épisodique \ac{SQLite}/\ac{FAISS}), ainsi que l'index de référence \texttt{rag\_suricata.index} et sa base \texttt{rag\_suricata.sqlite} (environ 49\,000 règles Suricata pré-indexées, utilisées en lecture seule). Le listing~\ref{lst:s4-pydantic} illustre le principe de validation stricte par Pydantic~v2 \cite{pydantic2023}, avec rejet explicite du bruit publicitaire et normalisation des règles Suricata renvoyées par le \ac{LLM}.
+
+\begin{lstlisting}[language=Python,caption={Principe de validation stricte et de triage de la sortie du LLM (extrait illustratif).},label={lst:s4-pydantic}]
+from pydantic import BaseModel, Field, field_validator, ValidationError
+
+class CTIActualitySchema(BaseModel):
+    type_article: str = Field(default="TECHNICAL_THREAT")
+    titre_menace: str = Field(default="Menace detectee")
+    fiabilite_score: int = Field(default=50, ge=0, le=100)
+
+    @field_validator("type_article", mode="before")
+    @classmethod
+    def valider_type(cls, v):
+        val = str(v).upper().strip()
+        if "NOISE" in val or "PUB" in val or "COMMERCIAL" in val:
+            raise ValueError("Rejet : contenu hors-perimetre (NOISE).")
+        if "AWARENESS" in val:
+            return "AWARENESS"
+        return "TECHNICAL_THREAT"
+
+def trier(sortie_llm: dict):
+    try:
+        return CTIActualitySchema.model_validate(sortie_llm)
+    except ValidationError:
+        return None  # Rejet et journalisation
+\end{lstlisting}
+
+
+L'agent publie ses résultats via l'\ac{API} du backend Node.js (\texttt{/api/cti-sources} pour la lecture des sources actives, persistance dans la collection MongoDB \texttt{ctiactualities}), ce qui découple le processus d'inférence de la couche de présentation.
+
+\subsubsection{Interfaces et résultats}
+Les captures suivantes illustrent l'exécution de l'agent et le résultat produit.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\textwidth]{}
+    \caption{Journal d'exécution de l'agent CTI : ingestion et triage d'un article}
+    \label{fig:journal_exec_agent_cti}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\textwidth]{}
+    \caption{Génération et validation d'une règle Suricata candidate}
+    \label{fig:gen_validate_regle_suricata}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\textwidth]{}
+    \caption{Fil d'actualités CTI affiché sur le dashboard, statut \texttt{PENDING}}
+    \label{fig:fils_actualite_cti_affiche_dashboard}
+\end{figure}
+
+\subsection{Validation}
+La validation vérifie chaque critère d'acceptation du backlog par un scénario de test dédié (tableau~\ref{tab:val-s4}).
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|l|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|}
+
+\caption{Plan de validation du sprint 4.}
+\label{tab:val-s4} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Test} & \textbf{Scénario} & \textbf{Résultat attendu} & \textbf{Résultat observé} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Test} & \textbf{Scénario} & \textbf{Résultat attendu} & \textbf{Résultat observé} \\ \hline
+\endhead
+
+T4.1 & Article technique nouveau soumis à l'agent & Classé \texttt{TECHNICAL\_THREAT}, règle candidate générée & \textit{[à compléter]} \\ \hline
+T4.2 & Article de sensibilisation (\emph{ex.} phishing générique) & Classé \texttt{AWARENESS}, statut \texttt{PENDING\_FORMATION} & \textit{[à compléter]} \\ \hline
+T4.3 & Contenu publicitaire/hors-périmètre & Rejeté (\texttt{NOISE}), non persisté & \textit{[à compléter]} \\ \hline
+T4.4 & Article déjà présent en base (même lien) & Ignoré sans appel au LLM & \textit{[à compléter]} \\ \hline
+T4.5 & Sortie LLM malformée & Rejet par Pydantic, journalisation & \textit{[à compléter]} \\ \hline
+\end{xltabular}
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\textwidth]{}
+    \caption{Résultats des tests de validation du sprint 4}
+    \label{fig:results_test_validate_sprint4}
+\end{figure}
+
+\subsection{Conclusion du sprint 4}
+Ce sprint a livré un agent \ac{CTI} autonome et local, capable de trier automatiquement le renseignement \ac{OSINT} entre menace technique et contenu de sensibilisation, tout en neutralisant les risques d'injection de contenu de faible qualité. Le sprint suivant exploite précisément la branche « sensibilisation » de ce triage pour s'attaquer à un autre maillon de la chaîne de sécurité~: le facteur humain.
+
+%==============================================================================
+\section{Sprint 5 : Mitigation du risque humain (agent Gemini et RAG LMS)}\label{sec:sprint5}
+%==============================================================================
+Le facteur humain demeure une cause majeure de compromission~: le rapport \ac{DBIR} de Verizon attribue à l'élément humain non malveillant environ 68\,\% des violations analysées~\cite{verizon2024dbir}. Ce sprint génère donc des parcours de sensibilisation personnalisés à partir des contenus classés \texttt{AWARENESS} par l'agent \ac{CTI} du sprint~4.
+
+\subsection{Backlog du sprint 5}
+Le tableau~\ref{tab:backlog-s5} liste les user stories du sprint.
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|l|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|c|}
+
+\caption{Backlog du sprint 5.}
+\label{tab:backlog-s5} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{ID} & \textbf{User story} & \textbf{Critère d'acceptation} & \textbf{Priorité} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{ID} & \textbf{User story} & \textbf{Critère d'acceptation} & \textbf{Priorité} \\ \hline
+\endhead
+
+US5.1 & En tant que responsable sécurité, je veux qu'un module de cours complet (titre, diagramme Mermaid, 3~chapitres, \ac{QCM} de 5 à 7 questions) soit généré via l'\ac{API} \texttt{gemini-3.6-flash} à partir d'un article \texttt{AWARENESS}. & Module conforme au format JSON attendu, enregistré dans la collection \texttt{ctiactualities} (statut \texttt{FORMATION\_GENERATED}). & Haute \\ \hline
+US5.2 & En tant que responsable sécurité, je veux diffuser la formation par e-mail (Nodemailer) à un département ciblé ou à l'ensemble des employés, listés dans \texttt{employes.json}. & E-mail personnalisé reçu, contenant l'identifiant employé et le lien vers le portail. & Haute \\ \hline
+US5.3 & En tant qu'employé, je veux m'authentifier sur le portail \ac{LMS} par mon identifiant employé et passer le \ac{QCM} de validation des acquis. & Connexion réussie par \texttt{id\_employe} ; note calculée et affichée. & Moyenne \\ \hline
+US5.4 & En tant qu'auditeur, je veux que chaque tentative soit enregistrée dans la collection MongoDB \texttt{FormationRecord} (dernier score conservé). & Un enregistrement par couple (employé, cours), mis à jour à chaque nouvelle tentative. & Haute \\ \hline
+US5.5 & En tant qu'administrateur, je veux consulter la liste des résultats de formation, avec un accès protégé par authentification. & Route protégée par jeton \ac{JWT} et rôle \ac{RSSI}. & Moyenne \\ \hline
+
+\end{xltabular}
+
+\subsection{Analyse}
+Cette section décrit l'architecture du sprint et ses cas d'utilisation.
+
+\subsubsection{Architecture du sprint}
+La figure~\ref{fig:archy_sprint5} montre comment un article \texttt{AWARENESS} déclenche, sur décision de l'administrateur, la génération d'un parcours de formation par l'\ac{API} Gemini, sa diffusion ciblée et son suivi de conformité.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{../diagrams/archy_sprint5.png}
+    \caption{Architecture du sprint 5}
+    \label{fig:archy_sprint5}
+\end{figure}
+
+
+Contrairement à l'agent \ac{CTI} du sprint~4, ce composant s'exécute côté backend Node.js et fait appel à un modèle \ac{LLM} externe hébergé dans le nuage~\cite{gemini2023} ; seuls le titre et le résumé de la menace, déjà vulgarisés par le triage local, lui sont transmis, sans détail d'infrastructure sensible.
+
+\subsubsection{Diagramme de cas d'utilisation}
+La figure~\ref{fig:diag_use_case_sprint5} présente les acteurs (administrateur, employé, service Gemini) et leurs interactions.
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{../diagrams/uc_sprint5.png}
+    \caption{Diagramme de cas d'utilisation du sprint 5}
+    \label{fig:diag_use_case_sprint5}
+\end{figure}
+
+
+\subsubsection{Description textuelle des cas d'utilisation}
+Le tableau~\ref{tab:uc-s5-lms} décrit le cas « Générer et diffuser un parcours de sensibilisation ».
+
+\begingroup
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|>{\bfseries\raggedright\arraybackslash}p{3.5cm}|>{\raggedright\arraybackslash}X|}
+
+\caption{Description textuelle du cas d'utilisation « Générer et diffuser un parcours de sensibilisation ».}
+\label{tab:uc-s5-lms} \\
+
+\hline
+\endfirsthead
+
+% Pied de page pour les pages intermédiaires
+\hline
+\multicolumn{2}{r}{\small\textit{Suite à la page suivante...}} \\
+\endfoot
+
+% Pied de page final
+\endlastfoot
+
+Cas d'utilisation & Générer et diffuser un parcours de sensibilisation \\ \hline
+Acteurs & Administrateur (principal), service Gemini, employé \\ \hline
+Pré-conditions & Article \texttt{AWARENESS} présent en base ; clé \ac{API} Gemini configurée ; annuaire \texttt{employes.json} disponible. \\ \hline
+Scénario nominal &
+\begin{enumerate}[nosep,leftmargin=*]
+\item L'administrateur déclenche la génération depuis le dashboard pour un article donné.
+\item Le backend construit un prompt contraint (titre, résumé, contraintes de format JSON strict) et appelle \texttt{gemini-3.6-flash}.
+\item Le module généré (cours, diagramme Mermaid, QCM) est validé puis enregistré ; le statut de l'article passe à \texttt{FORMATION\_GENERATED}.
+\item L'administrateur choisit la cible de diffusion (un département ou l'ensemble des employés).
+\item Un e-mail personnalisé est envoyé à chaque destinataire, contenant son identifiant employé et un lien vers le portail \ac{LMS}.
+\item L'employé s'authentifie par son identifiant, suit le module et passe le QCM.
+\item Le score est soumis et enregistré dans \texttt{FormationRecord} (mise à jour si nouvelle tentative).
+\end{enumerate} \\ \hline
+Scénarios alternatifs & (A1) Réponse Gemini non conforme au JSON attendu : échec renvoyé à l'administrateur, aucune persistance. \newline (A2) Identifiant employé inconnu au portail : accès refusé (401). \newline (A3) Aucun destinataire trouvé pour la cible choisie : diffusion annulée. \\ \hline
+Post-conditions & Un enregistrement \texttt{FormationRecord} est créé ou mis à jour pour chaque tentative de l'employé. \\ \hline
+
+\end{xltabular}
+\endgroup
+
+
+\subsection{Conception}
+Cette section présente la dynamique et le modèle de données du sprint.
+
+\subsubsection{Diagramme de séquence}
+Le diagramme de la figure~\ref{fig:s5-seq} détaille les échanges entre le backend, l'\ac{API} Gemini, le service de messagerie et MongoDB.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\textwidth]{../diagrams/Seq_Sprint5.png}
+    \caption{Diagramme de séquence « Génération résiliente de la formation »}
+    \label{fig:s5-seq}
+    
+\end{figure}
+
+\subsubsection{Diagramme de classes}
+Le modèle de données du \ac{LMS} (\texttt{CtiActuality}, \texttt{FormationRecord}) est représenté en figure~\ref{fig:diag_classe_sprint5}.
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{../diagrams/diag_classes_sprint5.png}
+    \caption{Diagramme de classes du sprint 5}
+    \label{fig:diag_classe_sprint5}
+\end{figure}
+
+
+\subsection{Réalisation}
+Cette section présente l'implémentation et les interfaces du LMS.
+
+\subsubsection{Composants}
+La génération du module est implémentée côté backend (\texttt{server.js}, route \texttt{/api/formations/generate}) via la librairie unifiée \texttt{@google/genai}. La diffusion (\texttt{/api/formations/distribute}) est protégée par le middleware d'authentification \ac{JWT} et lit l'annuaire structuré par département (\texttt{employes.json}). L'authentification employé (\texttt{/api/employes/verify}) et la soumission de score (\texttt{/api/formations/submit}) sont exposées sans jeton, l'identifiant employé faisant office de clé d'accès au portail.
+
+\subsubsection{Interfaces et résultats}
+Les captures suivantes illustrent la chaîne complète.
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{}
+    \caption{Module de cours généré par Gemini}
+    \label{fig:mod_cours_gene_gemini}
+\end{figure}
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{}
+    \caption{E-mail de notification personnalisé envoyé à l'employé}
+    \label{fig:mail_notif_employe}
+\end{figure}
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{}
+    \caption{Portail LMS : connexion par identifiant employé et QCM}
+    \label{fig:portail_LMS_cnx_idemp_qcm}
+\end{figure}
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{}
+    \caption{Enregistrement du score dans la collection \texttt{FormationRecord}}
+    \label{fig:save_score_collection}
+\end{figure}
+
+\subsection{Validation}
+Le tableau~\ref{tab:val-s5-lms} présente les scénarios de test du sprint.
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|l|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|}
+
+\caption{Plan de validation du sprint 5.}
+\label{tab:val-s5-lms} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Test} & \textbf{Scénario} & \textbf{Résultat attendu} & \textbf{Résultat observé} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Test} & \textbf{Scénario} & \textbf{Résultat attendu} & \textbf{Résultat observé} \\ \hline
+\endhead
+
+T5.1 & Génération sur un article \texttt{AWARENESS} réel & Module conforme (3 chapitres, 5 à 7 questions) & \textit{[à compléter]} \\ \hline
+T5.2 & Diffusion ciblée à un département & E-mails reçus par les employés du département uniquement & \textit{[à compléter]} \\ \hline
+T5.3 & Connexion avec un identifiant inconnu & Accès refusé (401) & \textit{[à compléter]} \\ \hline
+T5.4 & QCM soumis deux fois par le même employé & Seul le dernier score est conservé (upsert) & \textit{[à compléter]} \\ \hline
+T5.5 & Consultation des résultats sans jeton JWT & Accès refusé (401) & \textit{[à compléter]} \\ \hline
+
+\end{xltabular}
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{}
+    \caption{Résultats des tests de validation du sprint 5}
+    \label{fig:results_tests_validate_sprint5}
+\end{figure}
+
+
+\subsection{Conclusion du sprint 5}
+Ce sprint a livré une plateforme de sensibilisation automatisée, alimentée par le triage CTI du sprint~4 et traçable par enregistrement individuel des résultats. Le dernier sprint fédère l'ensemble des briques de détection et de renseignement dans un dashboard SOC et ferme la boucle de réponse.
+
+%==============================================================================
+\section{Sprint 6 : Orchestration SOAR multi-paliers, agent post-attaque et dashboard SOC}\label{sec:sprint6}
+%==============================================================================
+Le dernier sprint centralise le pilotage du \ac{SOC}, analyse les incidents a posteriori et automatise la neutralisation des menaces, conformément aux principes de gestion d'incident du \ac{NIST}~\cite{nist80061}. Il constitue l'aboutissement de la chaîne détection--analyse--réponse et révèle une distinction architecturale importante~: la corrélation et la décision autonome (\texttt{soar.py}) sont séparées de l'exécution supervisée par un humain (\texttt{agent\_soar.py}).
+
+\subsection{Backlog du sprint 6}
+Le tableau~\ref{tab:backlog-s6} liste les user stories retenues.
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|l|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|c|}
+
+\caption{Backlog du sprint 6.}
+\label{tab:backlog-s6} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{ID} & \textbf{User story} & \textbf{Critère d'acceptation} & \textbf{Priorité} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{ID} & \textbf{User story} & \textbf{Critère d'acceptation} & \textbf{Priorité} \\ \hline
+\endhead
+
+US6.1 & En tant qu'analyste, je veux un dashboard temps réel (Next.js~14 / Node.js / Socket.IO) affichant les alertes et l'état des composants sans rechargement de page. & Alerte visible en moins de 2~s après l'émission Kafka. & Haute \\ \hline
+US6.2 & En tant qu'analyste, je veux que le \ac{SOAR} corrèle les alertes ML et Suricata sur une fenêtre de 30~s afin de distinguer une menace confirmée d'une alerte isolée. & Une corrélation ML+Suricata sur la même IP déclenche le palier le plus élevé. & Haute \\ \hline
+US6.3 & En tant qu'analyste, je veux un rapport automatique de l'incident (score de confiance, technique \ac{MITRE} \ac{ATTCK}, recommandations) généré par \texttt{agent\_ia.py}. & Rapport JSON structuré publié sur \texttt{incident-reports}. & Haute \\ \hline
+US6.4 & En tant qu'analyste, je veux un score composite de menace agrégeant Suricata, ML et LLM. & Score calculé pour chaque incident qualifié et affiché sur le dashboard. & Haute \\ \hline
+US6.5 & En tant qu'organisation, je veux un mode auto-pilote (mode nuit) bloquant automatiquement l'IP source lorsqu'aucun administrateur n'est connecté et que le score composite est $\ge 85\,\%$. & Blocage sans délai en l'absence d'analyste, notification par e-mail. & Haute \\ \hline
+US6.6 & En tant qu'administrateur, je veux pouvoir déclencher ou ignorer manuellement un blocage depuis le dashboard lorsque je suis connecté. & Commande relayée à l'agent d'exécution et accusé de réception affiché. & Haute \\ \hline
+US6.7 & En tant qu'organisation, je veux qu'une IP de la liste blanche ne soit jamais bloquée automatiquement, même en cas d'alerte (politique Zero Trust \emph{fail-open}). & Aucun blocage sur une IP whitelistée ; alerte tracée et signalée comme telle. & Haute \\ \hline
+US6.8 & En tant qu'administrateur, je veux un bouclier anti-DDoS déclenchable à distance (SYN cookies et limitation de débit) en cas de saturation volumétrique. & Règles appliquées sur \texttt{VM-Edge} en moins de 10~s par IP cible. & Moyenne \\ \hline
+US6.9 & En tant qu'administrateur, je veux un watchdog contrôlant la santé des machines virtuelles toutes les 15~secondes. & Panne détectée et statut \texttt{Hors Ligne} propagé au dashboard. & Moyenne \\ \hline
+
+\end{xltabular}
+
+\subsection{Analyse}
+Cette section décrit l'architecture globale finale et les cas d'utilisation du sprint.
+
+\subsubsection{Architecture du sprint}
+La figure~\ref{fig:archy_sprint6} présente l'architecture complète~: topics Kafka, agents SOAR, backend et dashboard. Le tableau~\ref{tab:topics} rappelle les topics Kafka effectivement mobilisés~; il convient de noter qu'aucun topic Kafka dédié n'est utilisé pour les commandes de l'administrateur, celles-ci transitant exclusivement par Socket.IO.
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{../diagrams/archy_sprint6.png}
+    \caption{Architecture du sprint 6}
+    \label{fig:archy_sprint6}
+\end{figure}
+
+\begingroup
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}p{3.2cm}|>{\raggedright\arraybackslash}p{3.2cm}|>{\raggedright\arraybackslash}p{2.8cm}|>{\raggedright\arraybackslash}X|}
+
+\caption{Topics Kafka mobilisés par le sprint 6.}
+\label{tab:topics} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Topic} & \textbf{Producteur} & \textbf{Consommateur} & \textbf{Rôle} \\ \hline
+\endfirsthead
+
+% En-tête pour les pages suivantes
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Topic} & \textbf{Producteur} & \textbf{Consommateur} & \textbf{Rôle} \\ \hline
+\endhead
+
+% Pied de page pour les pages intermédiaires
+\hline
+\multicolumn{4}{r}{\small\textit{Suite à la page suivante...}} \\
+\endfoot
+
+% Pied de page final
+\endlastfoot
+
+\texttt{ml-alerts} & \texttt{realtime\_interface.py} & \texttt{soar.py} & Anomalie ML confirmée \\ \hline
+\texttt{suricata-alerts} & Sonde Suricata (via Filebeat) & \texttt{soar.py} & Alerte par signature \\ \hline
+\texttt{alerts-for-llm} & \texttt{soar.py} & \texttt{agent\_ia.py}, \texttt{server.js} & Alerte corrélée à analyser / à afficher \\ \hline
+\texttt{incident-reports} & \texttt{agent\_ia.py}, \texttt{soar.py} (bypass Zero Trust) & \texttt{server.js} & Rapport structuré ou alerte de contournement \\ \hline
+
+\end{xltabular}
+\endgroup
+
+
+\subsubsection{Deux moteurs de remédiation distincts}
+L'implémentation distingue deux composants portant des responsabilités différentes, résumés dans le tableau~\ref{tab:soar-vs-agentsoar}~: \texttt{soar.py}, hébergé sur \texttt{vm-ml}, corrèle les alertes et décide en autonomie complète (sans intervention humaine) ; \texttt{agent\_soar.py}, hébergé sur \texttt{vm-response}, est un simple exécuteur qui reste en écoute Socket.IO et n'agit que sur ordre explicite du backend, qu'il émane d'un administrateur ou du mode auto-pilote.
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|l|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|}
+
+\caption{Distinction entre \texttt{soar.py} (orchestrateur autonome) et \texttt{agent\_soar.py} (exécuteur supervisé).}
+\label{tab:soar-vs-agentsoar} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{\texttt{soar.py} (vm-ml)} & \textbf{\texttt{agent\_soar.py} (vm-response)} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{\texttt{soar.py} (vm-ml)} & \textbf{\texttt{agent\_soar.py} (vm-response)} \\ \hline
+\endhead
+
+Déclencheur & Consommation directe des topics Kafka \texttt{ml-alerts}/\texttt{suricata-alerts} & Événement Socket.IO \texttt{execute\_command} émis par \texttt{server.js} \\ \hline
+Décision & Corrélation, seuils de sévérité, logique de vote & Aucune ; exécution de l'ordre reçu \\ \hline
+Origine du déclenchement & Entièrement autonome (aucune supervision humaine) & Action d'un administrateur \emph{ou} décision auto-pilote du backend \\ \hline
+Action & Blocage SSH direct (\texttt{bloquer\_ip}) ou notification de l'agent IA & Blocage SSH sur ordre, avec accusé \texttt{command\_result} \\ \hline
+
+\end{xltabular}
+
+\subsubsection{Diagramme de cas d'utilisation}
+La figure~\ref{fig:diag_use_case_sprint6} identifie les acteurs (analyste, administrateur, agents, attaquant) et les cas d'utilisation.
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{../diagrams/uc_sprint6.png}
+    \caption{Diagramme de cas d'utilisation du sprint 6}
+    \label{fig:diag_use_case_sprint6}
+\end{figure}
+
+\subsubsection{Description textuelle des cas d'utilisation}
+Le tableau~\ref{tab:uc-s6} décrit le cas « Neutraliser une menace corrélée » (chemin autonome, \texttt{soar.py})
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|>{\bfseries\raggedright\arraybackslash}p{3.2cm}|>{\raggedright\arraybackslash}X|}
+
+\caption{Description textuelle du cas d'utilisation « Neutraliser une menace corrélée »}
+\label{tab:uc-s6} \\
+
+\hline
+\endfirsthead
+\hline
+\endhead
+
+Cas d'utilisation & Neutraliser une menace corrélée \\ \hline
+Acteurs & \texttt{soar.py} (principal), \texttt{agent\_ia.py}, backend (secondaire) \\ \hline
+Pré-conditions & 
+\begin{itemize}[nosep,leftmargin=*]
+\item Connexion SSH par clés vers \texttt{VM-Edge} établie.
+\item Bus d'événements Kafka opérationnel.
+\item Liste blanche chargée en mémoire.
+\end{itemize} \\ \hline
+Scénario nominal &
+\begin{enumerate}[nosep,leftmargin=*]
+\item \texttt{soar.py} reçoit une alerte ML ou Suricata et purge le cache d'IP en cours d'analyse (\ac{TTL} de 300~s).
+\item Si l'IP source figure dans la liste blanche, une alerte de contournement Zero Trust est publiée directement sur \texttt{incident-reports}, sans passer par l'IA (scénario A1).
+\item Sinon, \texttt{soar.py} vérifie la corrélation temporelle (fenêtre de 30~s) entre une alerte ML et une alerte Suricata sur la même IP.
+\item En cas de corrélation, ou de signature Suricata marquée \texttt{[CRITIQUE]}, l'IP est bloquée directement par SSH (\texttt{iptables DROP}) et l'agent IA est notifié via \texttt{alerts-for-llm} avec \texttt{auto\_blocked=true}.
+\item En l'absence de corrélation, seule une notification à l'agent IA est envoyée (\texttt{auto\_blocked=false}), sans blocage.
+\item \texttt{agent\_ia.py} produit le rapport structuré et le publie sur \texttt{incident-reports}.
+\item Le backend calcule le score composite, met à jour l'incident et diffuse \texttt{soar\_incident\_updated}.
+\end{enumerate} \\ \hline
+Scénarios alternatifs & 
+\begin{enumerate}[label=(A\arabic*),nosep,leftmargin=*]
+\item \textbf{IP en liste blanche :} bypass direct, blocage refusé, alerte «~mouvement latéral~» tracée.
+\item \textbf{Ollama indisponible :} rapport de secours (gabarit JSON) publié par \texttt{agent\_ia.py}.
+\item \textbf{Alerte répétée :} si une alerte de la même catégorie a déjà été notifiée dans les 60 dernières secondes, la notification est supprimée (anti-saturation LLM).
+\end{enumerate} \\ \hline
+Post-conditions & 
+\begin{itemize}[nosep,leftmargin=*]
+\item L'IP est bloquée ou non, selon le palier de menace atteint.
+\item L'incident est systématiquement tracé et rendu visible sur le dashboard.
+\end{itemize} \\ \hline
+
+\end{xltabular}
+
+
+\subsection{Conception}
+Cette section détaille la dynamique de bout en bout, la logique de décision et le modèle de données.
+
+\subsubsection{Score composite de menace}
+Le niveau de risque affiché sur le dashboard agrège les trois sources de détection selon la pondération de l'équation~\eqref{eq:score}, calculée côté backend (\texttt{server.js}) à réception du rapport de l'agent IA~:
+\begin{equation}
+S_{\text{composite}} = 0{,}4\cdot S_{\text{Suricata}} + 0{,}3\cdot S_{\text{ML}} + 0{,}3\cdot S_{\text{LLM}}
+\label{eq:score}
+\end{equation}
+La pondération privilégie la détection par signature, dont la précision est la plus élevée, tout en intégrant l'écart comportemental mesuré par l'erreur de reconstruction du \ac{LSTMVAE} \cite{kingma2014vae,hochreiter1997lstm} et l'évaluation cognitive du \ac{LLM} (\texttt{score\_confiance}). C'est ce score composite, et non un seuil de sévérité brut, qui conditionne le déclenchement du mode auto-pilote.
+
+\subsubsection{Notification en deux temps}
+Afin de ne pas exposer l'administrateur à un délai perçu de latence pendant la génération du rapport IA (de l'ordre de quelques secondes à une trentaine de secondes selon la charge), le backend notifie le dashboard \emph{avant} que l'analyse cognitive ne soit terminée~: un incident provisoire est créé et diffusé (\texttt{soar\_incident\_incoming}) dès réception sur \texttt{alerts-for-llm}, avec un résumé d'attente ; il est ensuite complété et rediffusé (\texttt{soar\_incident\_updated}) une fois le rapport structuré disponible sur \texttt{incident-reports}. Ce choix privilégie la réactivité perçue sur l'exhaustivité immédiate du diagnostic, cohérent avec l'objectif de défense 24/7 à faible latence.
+
+\subsubsection{Diagrammes de séquence}
+La figure~\ref{fig:diag_seq_annomalies_dashboard} décrit le flux de la détection au dashboard, et la figure~\ref{fig:decesion_auto_vs_exec_supervised} la logique de décision entre les paliers autonome et supervisé.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{../diagrams/Seq_Sprint6_AnomalieVersDashboard_3.png}
+    \caption{Diagramme de séquence « de l'anomalie détectée à l'affichage sur le dashboard »}
+    \label{fig:diag_seq_annomalies_dashboard}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{../diagrams/seq_sprint6-Décision-Auto-Superv.png}
+    \caption{Diagramme de séquence « décision autonome versus exécution supervisée »}
+    \label{fig:decesion_auto_vs_exec_supervised}
+\end{figure}
+
+\subsubsection{Diagramme de classes}
+Le modèle de données de l'incident (\texttt{SoarCase}) et de la machine virtuelle supervisée (\texttt{VmNode}) est présenté en figure~\ref{fig:diag_classes_sprint6}.
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\textwidth]{../diagrams/diag_classes_sprint6.png}
+    \caption{Diagramme de classes du sprint 6}
+    \label{fig:diag_classes_sprint6}
+\end{figure}
+
+\subsubsection{Diagramme d'états de la réponse}
+Le cycle de vie d'un incident, de sa détection à sa clôture, est modélisé par la figure~\ref{fig:diag_etat_incident_soar}.
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{../diagrams/Etats_incident_SOAR_2.png}
+    \caption{Diagramme d'états d'un incident SOAR}
+    \label{fig:diag_etat_incident_soar}
+    
+\end{figure}
+
+\subsection{Réalisation}
+Cette section présente l'implémentation du moteur de corrélation, de l'agent post-attaque, du dashboard et des mécanismes de résilience.
+
+\subsubsection{Moteur de corrélation autonome (\texttt{soar.py})}
+Le moteur de corrélation maintient en mémoire l'horodatage de la dernière alerte ML et Suricata par IP, ainsi qu'un cache des IP en cours d'analyse par l'agent IA, purgé par \ac{TTL} (300~s) pour permettre une re-notification après expiration. Une boucle de reconnexion automatique (nouvelle tentative toutes les 5~s) enveloppe la connexion Kafka afin qu'une exception transitoire n'interrompe pas durablement le service.
+
+\subsubsection{Agent IA post-attaque}
+L'agent \texttt{agent\_ia.py} consomme \texttt{alerts-for-llm}, interroge \ac{Ollama} (\texttt{llama3.2:3b}, sortie JSON forcée) et publie sur \texttt{incident-reports}~\cite{llama3herd2024,ollama2024}. Le rapport respecte un format structuré (listing~\ref{lst:json7}), les techniques étant référencées selon \ac{MITRE} \ac{ATTCK}~\cite{strom2018attck}. En cas d'indisponibilité du \ac{LLM} ou d'échec de parsing JSON, un gabarit de secours préserve la continuité du pipeline.
+
+\begin{lstlisting}[language=Python,caption={Format de diagnostic structuré publié par l'agent IA (exemple illustratif).},label={lst:json7}]
+{
+  "titre_incident": "Balayage de ports suivi d'une tentative SSH",
+  "resume_executif": "...",
+  "niveau_severite": "Critique",
+  "score_confiance": 92,
+  "mitre_attack_technique": "T1021.001",
+  "analyse_technique": "...",
+  "recommandations_actions": [
+    "Action immediate 1",
+    "Action de remediation 2"
+  ]
+}
+\end{lstlisting}
+
+\subsubsection{Politique Zero Trust et corrélation anti-faux-positif}
+Deux mécanismes distincts protègent les actifs critiques listés dans la liste blanche partagée (\texttt{actifs\_critiques.json})~: d'une part, un bypass inconditionnel côté \texttt{soar.py}, qui refuse tout blocage automatique d'une IP whitelistée et publie directement une alerte « mouvement latéral » sans passer par l'agent IA (politique \emph{fail-open}) ; d'autre part, un filtre de corrélation anti-faux-positif côté backend, qui ignore une alerte émise par un actif whitelisté si une attaque externe réelle a été détectée dans les 180~dernières secondes, cette anomalie étant alors considérée comme du bruit collatéral plutôt qu'un mouvement latéral avéré.
+
+\subsubsection{Bouclier anti-DDoS}
+En cas de détection volumétrique, \texttt{soar.py} peut déclencher à distance, par SSH, l'activation de \emph{SYN cookies} et d'une règle de limitation de débit sur \texttt{VM-Edge}, puis notifie l'agent IA pour traçabilité de l'événement.
+
+\subsubsection{Mode auto-pilote et exécution supervisée}
+Le tableau~\ref{tab:paliers} résume les trois niveaux de traitement internes à \texttt{soar.py}, complétés par le mode auto-pilote piloté depuis le backend. Le déclenchement sans délai du blocage autonome est un choix de conception délibéré~: en défense 24/7, tout délai d'attente expose le système à des attaques parallèles pendant la fenêtre d'inaction.
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|l|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|}
+
+\caption{Paliers de traitement du SOAR et mode auto-pilote.}
+\label{tab:paliers} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Palier} & \textbf{Condition} & \textbf{Action} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Palier} & \textbf{Condition} & \textbf{Action} \\ \hline
+\endhead
+
+1 -- Journalisation & Alerte Suricata de sévérité faible (informationnelle) & Journalisée uniquement, aucune notification \\ \hline
+2 -- Notification & Alerte ML isolée, ou Suricata de sévérité $\le 2$ & Notification de l'agent IA, aucun blocage \\ \hline
+3 -- Blocage autonome & Corrélation ML+Suricata (fenêtre 30~s), ou signature \texttt{[CRITIQUE]} & Blocage SSH immédiat par \texttt{soar.py} et notification de l'agent IA \\ \hline
+Auto-pilote (mode nuit) & Aucun administrateur actif et score composite $\ge 85\,\%$ & Commande \texttt{execute\_command} relayée à \texttt{agent\_soar.py} ; blocage sans délai \\ \hline
+Manuel & Administrateur actif, décision explicite (\texttt{send\_command}) & Commande relayée à \texttt{agent\_soar.py} ; accusé \texttt{command\_result} \\ \hline
+
+\end{xltabular}
+
+\subsubsection{Dashboard SOC, authentification et watchdog}
+Le dashboard (Next.js~14, TypeScript, Tailwind CSS) adopte un thème sombre de type \emph{glassmorphism} ; il écoute les événements Socket.IO \texttt{soar\_incident\_incoming} et \texttt{soar\_incident\_updated}, et émet \texttt{send\_command} lors des actions de l'administrateur~\cite{socketio2024}. L'accès aux routes d'administration sensibles (whitelist, résultats de formation, diffusion) est protégé par un jeton \ac{JWT} valide 8~heures, vérifié par un middleware qui contrôle également le rôle \ac{RSSI} de l'utilisateur. Le watchdog contrôle l'ensemble des nœuds enregistrés toutes les 15~secondes et propage un statut \texttt{Hors Ligne} en cas d'absence de battement de cœur.
+
+\subsubsection{Interfaces et résultats}
+Les captures suivantes présentent les principales interfaces du \ac{SOC}.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\textwidth]{}
+    \caption{Vue globale du dashboard SOC}
+    \label{fig:vue_globale_dashbord_soc}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\textwidth]{}
+    \caption{Overlay d'alerte temps réel avec badge de sévérité et technique MITRE ATT\&CK}
+    \label{fig:alert_badge_sev_tech}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\textwidth]{}
+    \caption{Page \texttt{/incidents} et export PDF du rapport}
+    \label{fig:incident_export_pdf_rapport}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\textwidth]{}
+    \caption{Page \texttt{/infrastructure} : état des machines virtuelles (watchdog)}
+    \label{fig:infra_vms_state_watchdog}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\textwidth]{}
+    \caption{Règle \texttt{iptables} appliquée par l'agent d'exécution sur la cible}
+    \label{fig:apply_rule_agent_exec_cible}
+\end{figure}
+
+\subsection{Validation}
+Le tableau~\ref{tab:val-s6} présente les scénarios validant la boucle de réponse fermée. La route de simulation \texttt{/api/simulate-attack} a été utilisée pour injecter des incidents de test de bout en bout sans dépendre d'une attaque réelle.
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|l|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|}
+
+\caption{Plan de validation du sprint 6.}
+\label{tab:val-s6} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Test} & \textbf{Scénario} & \textbf{Résultat attendu} & \textbf{Résultat observé} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Test} & \textbf{Scénario} & \textbf{Résultat attendu} & \textbf{Résultat observé} \\ \hline
+\endhead
+
+T6.1 & Attaque simulée, administrateur connecté & Alerte temps réel, décision manuelle possible via \texttt{send\_command} & \textit{[à compléter]} \\ \hline
+T6.2 & Attaque simulée, aucun administrateur connecté & E-mail envoyé et blocage immédiat si score $\ge 85\,\%$ & \textit{[à compléter]} \\ \hline
+T6.3 & Ollama arrêté pendant une analyse & Rapport de secours publié, pipeline non interrompu & \textit{[à compléter]} \\ \hline
+T6.4 & Alertes ML et Suricata corrélées sur la même IP en moins de 30~s & Blocage autonome (palier~3), une seule règle iptables & \textit{[à compléter]} \\ \hline
+T6.5 & Alerte émise par une IP de la liste blanche & Aucun blocage, alerte Zero Trust tracée & \textit{[à compléter]} \\ \hline
+T6.6 & Alerte sur actif whitelisté dans les 180~s suivant une attaque externe confirmée & Faux positif ignoré (corrélation anti-bruit) & \textit{[à compléter]} \\ \hline
+T6.7 & Coupure puis reprise de la connexion Kafka & Reconnexion automatique sans intervention manuelle & \textit{[à compléter]} \\ \hline
+T6.8 & Arrêt d'un nœud supervisé & Panne détectée par le watchdog en $\le 15$~s & \textit{[à compléter]} \\ \hline
+T6.9 & Accès à une route d'administration sans jeton JWT & Accès refusé (401) & \textit{[à compléter]} \\ \hline
+
+\end{xltabular}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\textwidth]{}
+    \caption{Résultats des tests de validation du sprint 6}
+    \label{fig:results_tests_validate_sprint6}
+\end{figure}
+
+\subsection{Conclusion du sprint 6}
+Ce sprint a livré l'application SOC centralisée, l'agent post-attaque et la boucle de réponse \ac{SOAR} fermée, en clarifiant la séparation entre décision autonome et exécution supervisée. Il achève ainsi la chaîne détection--analyse--réponse de NG-IDPS.
+
+%------------------------------------------------------------------------------
+\section*{Conclusion}
+\addcontentsline{toc}{section}{Conclusion}
+%------------------------------------------------------------------------------
+Cette seconde release a complété le système NG-IDPS~: le sprint~4 anticipe les menaces par un triage de renseignement hybride, le sprint~5 réduit le risque humain par une sensibilisation ciblée, et le sprint~6 unifie supervision, analyse cognitive et réponse automatisée au sein d'une orchestration \ac{SOAR} à la fois autonome et supervisable par un analyste. Le chapitre suivant dresse le bilan général du projet et ses perspectives.

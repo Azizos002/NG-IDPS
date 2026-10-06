@@ -209,15 +209,15 @@ export default function IncidentsPage() {
           <tr>
             <th>Sévérité Estimée</th>
             <td>
-              <strong className="text-red-400">
-                ${incident.diagnostic_json?.niveau_severite}
+              <strong style="color: #dc2626;">
+                ${diag?.niveau_severite || "Non évaluée"}
               </strong>
             </td>
             <th>Statut SOAR</th>
             <td>${incident.caseStatus}</td>
           </tr>
           <tr>
-            <th>Tactique MITRE</th><td>${mitre}</td>
+            <th>Technique  MITRE</th><td>${mitre}</td>
             <th>Score Confiance IA</th><td>${confidence}%</td>
           </tr>
         </table>
@@ -227,7 +227,7 @@ export default function IncidentsPage() {
 
         <div class="section-title">2. Analyse Technique Structurée</div>
         <p class="technical-box">
-          <strong>[PROCESS_DUMP]</strong> > Analyse du comportement et vecteurs de compromission :<br/><br/>
+          <strong>[ANALYSE_RÉSEAU]</strong> > Analyse du comportement et vecteurs de compromission :<br/><br/>          
           ${technicalAnalysis}
         </p>
 
@@ -237,12 +237,10 @@ export default function IncidentsPage() {
         <div class="section-title">4. Piste d'Audit & Conformité</div>
         <p>
           <strong>Corrélation SIEM (Logs Bruts) :</strong> Les logs complets de cet incident sont archivés sur le cluster Elastic. Cliquez sur le lien interactif ci-dessous pour y accéder en toute sécurité.<br/>
-          <span style="color: #3b82f6; font-size: 12px; word-break: break-all;">${rawLogsUrl}</span>
         </p>
         
         <!-- Espace réservé pour que le lien cliquable natif ne chevauche pas le footer -->
-        <div style="height: 35px;"></div>
-
+        <div id="zone-lien" style="height: 35px;"></div>
         <div class="footer">
           Ce document est la propriété exclusive du Centre d'Opérations de Sécurité. La diffusion externe est strictement interdite sans l'autorisation préalable de la direction informatique.<br/>
           Généré par le sous-système d'Intelligence Artificielle Autonome.
@@ -254,6 +252,12 @@ export default function IncidentsPage() {
 
       await new Promise(resolve => setTimeout(resolve, 300));
 
+      // Mesures du contenu RÉEL avant la capture : hauteur du rapport
+      // et position verticale de la zone réservée au lien
+      const contenuPx = iframeDoc.body.offsetHeight;
+      const zoneLien = iframeDoc.getElementById("zone-lien");
+      const zoneTopPx = zoneLien ? zoneLien.getBoundingClientRect().top : contenuPx - 120;
+
       const canvas = await html2canvas(iframeDoc.body, {
         scale: 2,
         useCORS: true,
@@ -264,33 +268,42 @@ export default function IncidentsPage() {
       const pdf = new jsPDF("p", "mm", "a4");
 
       const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgHeight = (canvas.height * pdfWidth) / canvas.width; // l'image peut contenir du blanc en bas
+      const pxToMm = pdfWidth / 800;                                // l'iframe fait 800 px de large
+      const contenuMm = contenuPx * pxToMm;                         // hauteur utile du rapport
 
-      pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
+      // Page 1, puis une page de plus UNIQUEMENT si le contenu utile dépasse un A4
+      pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, imgHeight);
+      let heightLeft = contenuMm - pageHeight;
+      let position = 0;
+      while (heightLeft > 0) {
+        position -= pageHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
 
-      // =========================================================
-      // INJECTION DU LIEN NATIF CLIQUABLE PAR-DESSUS LE PDF
-      // =========================================================
+      // Lien Kibana cliquable, posé dans la zone réservée (sur la bonne page)
+      const zoneMm = (zoneTopPx + 22) * pxToMm;
+      const pageDuLien = Math.floor(zoneMm / pageHeight);
+      pdf.setPage(pageDuLien + 1);
+      const yPos = zoneMm - pageDuLien * pageHeight;
+
       pdf.setFontSize(10);
       pdf.setTextColor(59, 130, 246); // Bleu (#3b82f6)
 
       const linkText = "Ouvrir les logs bruts dans Kibana";
       const textWidth = pdf.getTextWidth(linkText);
-      const xPos = 14; // Aligné à la marge de gauche (14mm)
+      const xPos = 14; // aligné sur la marge du texte
 
-      // Position verticale dynamique juste au-dessus du footer
-      const yPos = pdfHeight - 25;
-
-      // Création du lien interactif cliquable
       pdf.textWithLink(linkText, xPos, yPos, { url: rawLogsUrl });
 
-      // Soulignement du lien pour indiquer l'interactivité visuelle
       pdf.setDrawColor(59, 130, 246);
       pdf.setLineWidth(0.3);
       pdf.line(xPos, yPos + 1, xPos + textWidth, yPos + 1);
 
       pdf.save(`Audit_SOC_${incident.id}.pdf`);
-
       document.body.removeChild(iframe);
     } catch (error) {
       console.error("[-] Erreur lors de l'export PDF :", error);

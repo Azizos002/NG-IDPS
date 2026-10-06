@@ -1,0 +1,729 @@
+% ==============================================================================
+% CHAPITRE 1 : PRÉSENTATION DU PROJET ET ÉTUDE DE L'EXISTANT
+% ==============================================================================
+
+\chapter{Présentation du Projet et Étude de l'Existant}
+\label{chap:chap1}
+
+\minitoc
+\newpage
+
+%========================================
+\section{Introduction}
+%========================================
+
+L'évolution rapide des systèmes d'information, l'interconnexion croissante des environnements réseau et la diversification des cybermenaces ont transformé les exigences en matière de cybersécurité. Les mécanismes traditionnels, reposant notamment sur des règles prédéfinies et des mécanismes de détection déterministes, montrent certaines limites face à des attaques de plus en plus variées et automatisées. La protection des actifs numériques appelle désormais des approches complétant la détection classique par l'analyse comportementale, la corrélation multi-source et l'automatisation de certaines réponses. C'est dans cette perspective que s'inscrit le projet \textbf{NG-IDPS (Next-Generation Intrusion Detection and Prevention System)}, présenté dans ce chapitre.
+
+Ce chapitre définit le champ d'application du projet, puis son contexte, sa problématique et ses objectifs. Une étude des solutions existantes permet ensuite d'identifier les besoins et les contraintes auxquels NG-IDPS cherche à répondre, avant la présentation des orientations de la solution et de la méthodologie de réalisation retenue. Une synthèse conclut le chapitre et introduit la spécification détaillée développée au chapitre suivant.
+
+
+%========================================
+\section{Champ d'application et Contexte Opérationnel}
+%========================================
+Le présent projet s'inscrit dans le cadre de l'obtention     du diplôme de \textbf{Mastère Professionnel en Computer Engineering -- Expert Réseaux}. Il porte sur l'étude, la conception et l'implémentation d'un système de détection et de prévention des intrusions réseau, désigné \textbf{NG-IDPS}, dans le domaine de la cybersécurité des infrastructures réseau. Le projet vise à intégrer plusieurs mécanismes complémentaires de détection, d'analyse, de corrélation et de réponse aux événements de sécurité.
+
+Le système proposé adopte une approche hybride combinant une détection déterministe fondée sur les signatures réseau (\textbf{Suricata}), une analyse comportementale reposant sur un modèle \textbf{LSTM-VAE}, un triage cognitif assuré par un \textbf{modèle de langage local (LLM)} et une orchestration \textbf{SOAR (Security Orchestration, Automation and Response)}. Il intègre également un volet de \textbf{Threat Intelligence (CTI)} destiné à enrichir l'analyse et à contribuer à l'évolution contrôlée des mécanismes de détection ainsi qu'à la contextualisation des contenus de sensibilisation.
+
+Le contexte opérationnel retenu est celui d'un environnement \textbf{on-premise et isolé}, déployé dans un laboratoire virtualisé sur un réseau \textbf{VMware Host-Only} (\texttt{192.168.56.0/24}). Le périmètre expérimental est limité à ce réseau : les scénarios d'attaque sont générés depuis une machine Kali Linux et les mécanismes de mitigation ciblent exclusivement les ressources du laboratoire. Le champ d'application de NG-IDPS couvre ainsi la chaîne \textbf{détection -- analyse -- corrélation -- décision -- réponse}, complétée par l'exploitation de renseignements sur les menaces.
+
+\section{Présentation du Projet}
+
+Cette section détaille le contexte d'émergence du projet NG-IDPS, formalise la problématique scientifique et opérationnelle qui le motive, puis énonce les objectifs fonctionnels et non fonctionnels fixés pour y répondre.
+
+\subsection{Contexte}
+
+L'évolution des systèmes d'information, l'interconnexion croissante des infrastructures et la diversification des cybermenaces renforcent les exigences en matière de détection et de prévention des intrusions. Les attaques contemporaines peuvent combiner des techniques connues et des comportements difficiles à identifier par les seuls mécanismes fondés sur des signatures ou des règles prédéfinies. Cette évolution a favorisé l'adoption d'approches complémentaires reposant notamment sur l'analyse comportementale, la corrélation de plusieurs sources d'information et l'automatisation de certaines opérations de sécurité.
+
+Dans ce contexte, les architectures modernes de cybersécurité associent progressivement des mécanismes de détection, d'analyse, d'orchestration et de renseignement sur les menaces. Les solutions existantes proposent différentes combinaisons de ces capacités, selon leurs architectures, leurs modèles de déploiement et leurs possibilités d'intégration. Cette diversité met en évidence l'intérêt d'une approche capable d'articuler plusieurs mécanismes au sein d'une même chaîne opérationnelle.
+
+Le projet NG-IDPS s'inscrit dans ce contexte en étudiant la conception d'une architecture de détection et de prévention adaptée à un environnement \textbf{on-premise et isolé}. Une attention particulière est accordée à la maîtrise locale des traitements, à la modularité de l'architecture et à l'intégration de mécanismes complémentaires de détection, d'analyse, de corrélation et de réponse.
+
+\subsection{Problématique}
+
+L'analyse du contexte précédent met en évidence plusieurs défis interdépendants liés à la conception d'un système de détection et de prévention adapté à un environnement local et contraint. Ces défis concernent notamment la rapidité de détection, la maîtrise des faux positifs, la détection de comportements inconnus, l'accessibilité des technologies et la continuité de la réponse.
+
+\textbf{Défi 1 — La contrainte de latence.} La valeur opérationnelle d'une détection dépend en partie de sa capacité à produire une décision dans un délai compatible avec l'évolution de l'incident. L'intégration de plusieurs étapes d'analyse peut toutefois introduire des délais supplémentaires. Comment concevoir un pipeline capable d'effectuer l'analyse comportementale et la prise de décision dans des délais compatibles avec les exigences d'une détection quasi temps réel ?
+
+\textbf{Défi 2 — La maîtrise des faux positifs.} Les mécanismes de détection comportementale peuvent produire des alertes correspondant à des activités légitimes mais inhabituelles. Un volume important de telles alertes peut augmenter la charge d'analyse et compliquer la priorisation des incidents. Comment calibrer le mécanisme de détection afin de maintenir une capacité suffisante à identifier les comportements suspects tout en limitant le nombre de fausses alertes ?
+
+\textbf{Défi 3 — La détection de comportements inconnus.} Les mécanismes fondés sur des signatures reposent sur l'existence de règles correspondant aux comportements ou événements recherchés. Ils ne permettent donc pas, à eux seuls, d'identifier directement certains comportements nouveaux pour lesquels aucune règle de détection appropriée n'est disponible. Comment compléter la détection déterministe par une approche comportementale capable d'identifier des écarts par rapport aux comportements considérés comme normaux ?
+
+\textbf{Défi 4 — L'accessibilité et la maîtrise de l'infrastructure.} Les plateformes de cybersécurité intégrant plusieurs capacités de détection, d'orchestration et d'analyse peuvent être associées à des modèles de licence, d'abonnement ou de déploiement qui ne correspondent pas nécessairement aux contraintes d'organisations disposant de ressources limitées ou nécessitant une maîtrise locale de leurs données. Comment concevoir une architecture reposant principalement sur des composants open-source et, pour ses fonctions critiques de détection, d'analyse et de réponse, sur des modèles auto-hébergés, tout en conservant une chaîne fonctionnelle cohérente et évolutive ?
+
+\textbf{Défi 5 — La continuité de la réponse.} Une supervision humaine continue peut être difficile à assurer dans des environnements disposant de ressources limitées. Certaines situations peuvent ainsi nécessiter l'exécution automatisée d'actions de mitigation selon des conditions préalablement définies. Comment automatiser certaines décisions et actions de réponse tout en conservant des mécanismes de contrôle, de traçabilité, d'audit et de respect du principe de moindre privilège ?
+
+Ces défis définissent ainsi l'espace de conception de ce travail : concevoir un système de détection et de prévention des intrusions combinant des mécanismes déterministes et comportementaux, intégrant l'analyse, la corrélation et la réponse automatisée, tout en restant adapté à un environnement local, isolé et soumis à des contraintes de ressources.
+
+\subsection{Objectifs du Projet}
+
+En réponse à la problématique formulée ci-dessus, les objectifs du projet NG-IDPS sont déclinés en deux catégories : des \textbf{objectifs fonctionnels (OF)}, décrivant les capacités que le système doit fournir, et des \textbf{objectifs non fonctionnels (ONF)}, définissant les principales contraintes de qualité et de performance auxquelles le système doit répondre.
+
+\subsubsection*{Objectifs fonctionnels}
+
+Les objectifs fonctionnels du système NG-IDPS sont présentés dans le tableau~\ref{tab:objectifs_fonctionnels}, couvrant les principales capacités de détection, d'analyse, de réponse, de supervision et de renseignement sur les menaces.
+
+\renewcommand{\arraystretch}{1.5}
+
+\begin{longtable}{|p{0.12\textwidth}|p{0.28\textwidth}|p{0.50\textwidth}|}
+
+\caption{Objectifs fonctionnels du système NG-IDPS}
+\label{tab:objectifs_fonctionnels} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{ID} & \textbf{Objectif} & \textbf{Description} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{ID} & \textbf{Objectif} & \textbf{Description} \\ \hline
+\endhead
+
+OF1 &
+\textbf{Capture et extraction réseau} &
+Mettre en place une chaîne de capture et d'extraction de caractéristiques réseau à partir des flux et événements générés par le système de détection réseau, afin d'alimenter les mécanismes d'analyse comportementale. \\ \hline
+
+OF2 &
+\textbf{Détection comportementale} &
+Concevoir, entraîner et déployer un modèle de détection d'anomalies comportementales non supervisé fondé sur une architecture LSTM-VAE, capable de fonctionner en inférence continue sur les données réseau. \\ \hline
+
+OF3 &
+\textbf{Orchestration et réponse} &
+Implémenter un moteur SOAR capable de corréler les alertes issues des canaux de détection déterministe et comportemental, d'appliquer des politiques de sécurité définies et de déclencher, lorsque les conditions prévues sont satisfaites, une action automatisée de mitigation réseau par \texttt{iptables}. \\ \hline
+
+OF4 &
+\textbf{Analyse cognitive} &
+Intégrer un agent d'analyse et de contextualisation des incidents fondé sur un modèle de langage exécuté localement, produisant un diagnostic structuré comprenant notamment le titre, le résumé exécutif, la sévérité, la technique MITRE ATT\&CK identifiée et les recommandations associées. \\ \hline
+
+OF5 &
+\textbf{Supervision SOC} &
+Développer un tableau de bord SOC permettant la supervision humaine, la visualisation des incidents et l'intervention manuelle, notamment pour la validation ou l'infirmation d'une action de blocage lorsqu'un opérateur est disponible. \\ \hline
+
+OF6 &
+\textbf{Veille et renseignement sur les menaces} &
+Mettre en œuvre un module de Cyber Threat Intelligence (CTI) capable d'agréger des sources OSINT, d'analyser les informations pertinentes, de contribuer à la génération de règles de détection candidates et de produire, lorsque cela est pertinent, des contenus de sensibilisation ciblés. \\ \hline
+
+OF7 &
+\textbf{Sensibiliser les utilisateurs aux menaces à caractère humain.} & 
+Le système doit générer, à partir d'un renseignement \ac{CTI} classé comme relevant du facteur humain, un parcours de formation ciblé (contenu pédagogique, diagramme explicatif, questionnaire de validation), le diffuser aux utilisateurs concernés et suivre les résultats obtenus. La génération de contenu s'appuie sur une chaîne de repli à trois niveaux -- deux services de langage accessibles par \ac{API} dans le nuage, complétés par un modèle exécuté localement en dernier recours -- afin de garantir la continuité du service pédagogique. \\ \hline
+\end{longtable}
+
+\subsubsection*{Objectifs non fonctionnels}
+
+Les objectifs non fonctionnels du système NG-IDPS sont présentés dans le tableau~\ref{tab:objectifs_non_fonctionnels}, en précisant les principales exigences de performance, de fiabilité, de latence, d'autonomie et de maîtrise de l'infrastructure.
+
+\renewcommand{\arraystretch}{1.5}
+
+\begin{longtable}{|p{0.12\textwidth}|p{0.25\textwidth}|p{0.49\textwidth}|}
+\caption{Objectifs non fonctionnels du système NG-IDPS}
+\label{tab:objectifs_non_fonctionnels} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{ID} & \textbf{Critère} & \textbf{Exigence / Cible} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{ID} & \textbf{Critère} & \textbf{Exigence / Cible} \\ \hline
+\endhead
+
+ONF1 &
+\textbf{Performance de détection} &
+Assurer, à l'échelle de la chaîne de détection complète (signatures Suricata et analyse comportementale LSTM-VAE combinées), la détection de l'ensemble des classes d'attaques couvertes par le protocole de validation défini au chapitre~3, chaque mécanisme couvrant les angles morts structurels de l'autre. Cet objectif est validé par un test en conditions réelles (rejeu chronologique de trafic de production, chapitre~3), ayant atteint un taux de détection de 100\,\% sur les six classes d'attaques exécutées (balayage de ports rapide et lent, identification de services, force brute SSH, scan applicatif web, inondation volumétrique). \\ \hline
+
+ONF2 &
+\textbf{Fiabilité} &
+Maintenir, à l'échelle de la chaîne de décision complète (détection, persistance temporelle et filtrage par liste blanche), un taux de déclenchement erroné négligeable sur trafic réel, afin de préserver la pertinence opérationnelle des actions de réponse automatisées. Cet objectif est validé par le même test en conditions réelles, mesurant un taux de 0,05\,\% de fenêtres bénignes signalées à tort sur plus de trois heures de trafic de production, sans qu'aucune n'ait atteint le seuil de persistance déclenchant une action. \\ \hline
+
+ONF3 &
+\textbf{Latence d'inférence} &
+Atteindre un temps d'inférence du modèle de détection comportementale inférieur à 15~ms par séquence, afin de permettre son intégration dans une chaîne de traitement en flux continu. Cette cible concerne l'inférence du modèle et non la latence de l'ensemble de la chaîne NG-IDPS. \\ \hline
+
+ONF4 &
+\textbf{Autonomie opérationnelle} &
+Permettre une capacité de réponse automatisée continue, 24 heures sur 24 et 7 jours sur 7, y compris en l'absence d'un opérateur humain connecté au tableau de bord, dans le respect des politiques de sécurité définies et des mécanismes de contrôle prévus. \\ \hline
+
+ONF5 &
+\textbf{Maîtrise de l'infrastructure et soutenabilité} &
+Privilégier des composants open-source et des modèles d'intelligence artificielle auto-hébergés pour les fonctions opérationnelles critiques, notamment la détection, l'analyse et la réponse aux incidents, afin de limiter les coûts de licence et la dépendance aux services cloud propriétaires. \\ \hline
+
+\end{longtable}
+
+%========================================
+\section{Étude et Analyse de l'Existant}
+%========================================
+
+La justification des choix architecturaux retenus suppose d'analyser les
+approches de sécurité réseau déployées dans l'industrie et d'identifier leurs
+principales limites face aux contraintes du très haut débit et aux exigences
+de confidentialité des données.
+
+\subsection{Évolution des Systèmes de Détection et de Réponse}
+
+Les systèmes de cybersécurité ont progressivement évolué d'une détection
+principalement fondée sur des signatures vers des approches combinant
+analyse comportementale, corrélation multi-source, renseignement sur les
+menaces et automatisation de la réponse, afin de réduire les limites des
+mécanismes reposant sur une seule source d'information.
+
+Le tableau~\ref{tab:evolution_detection_reponse} synthétise les principales
+approches rencontrées dans les solutions de sécurité modernes.
+
+\renewcommand{\arraystretch}{1.5}
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}X
+                              |>{\raggedright\arraybackslash}X
+                              |>{\raggedright\arraybackslash}X
+                              |>{\raggedright\arraybackslash}X|}
+\caption{Évolution des approches de détection et de réponse}
+\label{tab:evolution_detection_reponse} \\
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Approche} & \textbf{Principe} & \textbf{Apport} & \textbf{Limite principale} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Approche} & \textbf{Principe} & \textbf{Apport} & \textbf{Limite principale} \\ \hline
+\endhead
+
+NIDS / détection par signatures &
+Identification d'activités malveillantes à partir de signatures et de règles connues &
+Détection déterministe des menaces déjà caractérisées &
+Dépendance à la disponibilité et à la qualité des signatures \\
+\hline
+
+Détection comportementale &
+Identification d'écarts par rapport à un comportement considéré comme normal &
+Possibilité de détecter des comportements nouveaux ou atypiques &
+Sensibilité aux variations légitimes du trafic et aux changements de distribution \\
+\hline
+
+SIEM / XDR &
+Centralisation et corrélation d'événements provenant de plusieurs sources &
+Vision consolidée des événements de sécurité et amélioration de l'investigation &
+Complexité d'intégration et volume important d'événements à traiter \\
+\hline
+
+SOAR &
+Orchestration des processus d'analyse et d'actions de réponse &
+Automatisation des opérations répétitives et accélération de la réponse &
+Nécessité de définir des politiques et des garde-fous pour limiter les actions incorrectes \\
+\hline
+
+IA / assistance cognitive &
+Analyse et contextualisation des informations de sécurité à l'aide de modèles d'apprentissage ou de modèles de langage &
+Aide à l'interprétation des incidents et à la production de recommandations &
+Dépendance à la qualité des données et nécessité de contrôler les décisions générées \\
+\hline
+\end{xltabular}
+
+
+\paragraph{Synthèse.}
+Ces approches ne sont pas concurrentes mais complémentaires : la détection par signatures fournit une première source d'évidence déterministe, l'analyse comportementale permet d'examiner des écarts non associés à une signature connue, et les mécanismes de corrélation et d'orchestration combinent ces informations pour coordonner la réponse. Cette évolution conduit vers des architectures multi-capteurs dans lesquelles détection, analyse, contextualisation et réponse sont réparties entre mécanismes spécialisés.
+
+\subsection{Analyse des Approches Existantes}
+
+L'analyse des principales approches utilisées dans les systèmes de sécurité met en évidence plusieurs mécanismes complémentaires destinés à améliorer la détection, l'investigation et la réponse aux incidents. Ces approches diffèrent notamment par la nature des données exploitées, le niveau d'automatisation et les contraintes liées à leur déploiement. Le tableau~\ref{tab:analyse_approches_existantes} en présente une synthèse.
+
+% Prérequis dans le préambule :
+% \usepackage{xltabular}
+% \usepackage{array}
+% \usepackage[table]{xcolor}
+
+\renewcommand{\arraystretch}{1.5}
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|}
+
+\caption{Analyse synthétique des principales approches de sécurité}
+\label{tab:analyse_approches_existantes} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Approche} & \textbf{Fonction principale} & \textbf{Limites ou contraintes} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Approche} & \textbf{Fonction principale} & \textbf{Limites ou contraintes} \\ \hline
+\endhead
+
+Détection par signatures &
+Identifier des attaques connues à partir de règles et de signatures préétablies. &
+Ne permet pas, à elle seule, de couvrir efficacement certains comportements nouveaux ou non caractérisés. \\ \hline
+
+Détection comportementale &
+Identifier des écarts par rapport au comportement attendu d'une activité ou d'un flux réseau. &
+Peut être sensible aux variations légitimes du trafic et nécessite une modélisation adaptée du comportement normal. \\ \hline
+
+Corrélation multi-source &
+Regrouper et mettre en relation des événements provenant de plusieurs capteurs ou composants de sécurité. &
+Augmente la richesse du contexte mais introduit des contraintes de synchronisation, de corrélation et de traitement des événements. \\ \hline
+
+Analyse assistée par IA &
+Analyser, contextualiser et synthétiser les informations issues des événements de sécurité. &
+La pertinence des résultats dépend de la qualité du contexte fourni et nécessite un contrôle des décisions ou recommandations générées. \\ \hline
+
+Réponse automatisée &
+Exécuter automatiquement des actions de mitigation à partir de règles ou de conditions prédéfinies. &
+Une automatisation insuffisamment contrôlée peut entraîner des actions inappropriées ou affecter des actifs légitimes. \\ \hline
+
+Threat Intelligence &
+Enrichir la détection à partir d'informations externes relatives aux menaces, vulnérabilités et techniques d'attaque. &
+La qualité, la pertinence et l'actualité des sources influencent directement la valeur opérationnelle des informations obtenues. \\ \hline
+
+Déploiement on-premise &
+Maintenir les composants et les données de sécurité dans une infrastructure contrôlée localement. &
+Nécessite la disponibilité des ressources matérielles, logicielles et d'administration nécessaires au fonctionnement de la plateforme. \\ \hline
+
+\end{xltabular}
+Ces différentes approches couvrent des fonctions complémentaires de la chaîne de défense. La détection par signatures apporte une capacité déterministe, tandis que la détection comportementale permet d'identifier des activités s'écartant des comportements attendus. La corrélation multi-source rapproche ces différentes observations afin d'enrichir le contexte de l'incident, tandis que l'analyse assistée par IA contribue à leur interprétation et à leur synthèse.
+
+La réponse automatisée étend cette chaîne vers l'exécution d'actions de mitigation selon des conditions et des politiques préalablement définies. La Threat Intelligence contribue quant à elle à l'enrichissement du contexte de sécurité et peut participer à l'évolution contrôlée des mécanismes de détection ainsi qu'à la contextualisation des actions de sensibilisation. Enfin, le déploiement on-premise répond à des contraintes de maîtrise locale des données et des traitements, tout en impliquant des exigences propres à l'infrastructure d'hébergement.
+
+Cette complémentarité des fonctions constitue la base de la comparaison des solutions représentatives présentée dans la section suivante.
+
+\subsection{Analyse Comparative des Solutions Représentatives}
+Afin de situer NG-IDPS par rapport aux solutions existantes, une
+comparaison est réalisée à partir de plusieurs critères liés aux objectifs
+du projet, portant sur les capacités de détection, d'analyse et de réponse
+ainsi que sur les contraintes de déploiement et de maîtrise des données.
+
+\subsubsection{Critères retenus.}
+
+Les critères considérés sont les suivants:
+
+
+\begin{itemize}
+    \item \textbf{Détection comportementale:} capacité à identifier des
+    comportements ou activités atypiques au-delà des signatures connues.
+    
+    \item \textbf{Corrélation multi-source:} capacité à rapprocher des
+    événements provenant de plusieurs sources de sécurité.
+    
+    \item \textbf{Analyse assistée par IA:} utilisation de mécanismes
+    d'intelligence artificielle pour l'analyse, la contextualisation ou
+    l'investigation des incidents.
+    
+    \item \textbf{Réponse automatisée:} capacité à déclencher ou orchestrer
+    des actions de mitigation à partir des événements détectés.
+    
+    \item \textbf{Threat Intelligence:} intégration ou exploitation
+    d'informations relatives aux menaces, vulnérabilités et techniques
+    d'attaque.
+    
+    \item \textbf{Déploiement local:} possibilité de déployer les
+    composants de sécurité dans une infrastructure contrôlée localement.
+    
+    \item \textbf{Dépendance au cloud:} degré de dépendance à des services cloud pour les fonctions principales de sécurité.
+    
+    \item \textbf{Positionnement architectural:} orientation générale de la solution, notamment NIDS, XDR, SIEM, SOAR ou plateforme de sécurité
+    intégrée.
+\end{itemize}
+
+\newpage
+
+\renewcommand{\arraystretch}{1.4}
+\small
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}X
+                              |>{\raggedright\arraybackslash}X
+                              |>{\raggedright\arraybackslash}X
+                              |>{\raggedright\arraybackslash}X
+                              |>{\raggedright\arraybackslash}X
+                              |>{\raggedright\arraybackslash}X|}
+
+\caption{Comparaison de NG-IDPS avec des plateformes de référence}
+\label{tab:comparaison_solutions} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} &
+\textbf{Darktrace} &
+\textbf{CrowdStrike} &
+\textbf{Security Onion} &
+\textbf{Wazuh} &
+\textbf{NG-IDPS} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} &
+\textbf{Darktrace} &
+\textbf{CrowdStrike} &
+\textbf{Security Onion} &
+\textbf{Wazuh} &
+\textbf{NG-IDPS} \\ \hline
+\endhead
+
+\hline
+\multicolumn{6}{r}{\footnotesize \textit{Suite sur la page suivante}} \\
+\endfoot
+
+\hline
+\endlastfoot
+
+% ============================================================
+% BLOC A — Périmètre et détection
+% ============================================================
+
+\rowcolor[HTML]{D9D9D9}
+\multicolumn{6}{|l|}{\textbf{A. Périmètre et détection}} \\ \hline
+
+Périmètre de couverture &
+Multi-couches (réseau, endpoint, cloud, identité) &
+Multi-couches (endpoint, cloud, identité) &
+Réseau + hôte (via Elastic Agent / osquery) &
+Endpoint + hôte (agent-based) &
+\textbf{Réseau uniquement} \\ \hline
+
+Détection signature déterministe &
+Non native (approche comportementale) &
+Non native &
+Oui (Suricata / Zeek) &
+Non native &
+\textbf{Oui (Suricata)} \\ \hline
+
+Détection comportementale &
+Oui (ML propriétaire) &
+Oui (ML propriétaire) &
+Oui (Zeek + règles de corrélation) &
+Oui (FIM, analyse de logs, anomalies) &
+\textbf{Oui (LSTM-VAE, apprentissage profond)} \\ \hline
+
+
+% ============================================================
+% BLOC B — Corrélation et cognition
+% ============================================================
+
+\rowcolor[HTML]{D9D9D9}
+\multicolumn{6}{|l|}{\textbf{B. Corrélation et cognition}} \\ \hline
+
+Corrélation multi-source automatisée &
+Oui &
+Oui &
+Oui, selon les composants et intégrations utilisés &
+Oui, selon les composants et intégrations utilisés &
+\textbf{Oui : corrélation via Kafka et moteur SOAR} \\ \hline
+
+Analyse cognitive assistée par LLM &
+Selon les capacités et intégrations de la plateforme &
+Selon les capacités et intégrations de la plateforme &
+Selon les composants et intégrations utilisés &
+Selon les intégrations disponibles &
+\textbf{Oui : LLM local (Ollama) pour l'analyse et la contextualisation des incidents} \\ \hline
+
+Réponse automatisée (SOAR) &
+Oui, selon les capacités de la plateforme &
+Oui, selon les capacités de la plateforme &
+Selon les intégrations et l'architecture retenue &
+Oui, via Active Response et intégrations &
+\textbf{Oui : politiques de réponse à plusieurs niveaux et mode automatisé} \\ \hline
+
+Threat Intelligence et exploitation opérationnelle &
+Oui &
+Oui &
+Oui, via flux et intégrations CTI &
+Oui, via intégrations CTI &
+\textbf{Oui : enrichissement CTI/RAG local, contextualisation des menaces et alimentation de la chaîne de prévention} \\ \hline
+
+Génération et adaptation de règles à partir de la CTI &
+Selon les capacités de la plateforme &
+Selon les capacités de la plateforme &
+Oui, via les mécanismes de règles et d'intégration disponibles &
+Oui, via règles et mécanismes de personnalisation &
+\textbf{Oui : proposition de règles Suricata et déploiement contrôlé après validation} \\ \hline
+
+Formation de sécurité contextualisée par incident / CTI &
+Selon les fonctionnalités et intégrations disponibles &
+Selon les fonctionnalités et intégrations disponibles &
+Non native &
+Non native &
+\textbf{Oui : génération automatique ou proposition conditionnelle selon la pertinence CTI} \\ \hline
+
+Déploiement local / maîtrise des données &
+Selon l'architecture et l'édition &
+Selon l'architecture et les composants retenus &
+Oui &
+Oui &
+\textbf{Oui : architecture majoritairement locale, avec dépendances externes configurables} \\ \hline
+
+Remplaçabilité technologique &
+Selon les capacités de la plateforme &
+Selon les capacités de la plateforme &
+Oui, via composants et intégrations &
+Oui, via composants et intégrations &
+\textbf{Élevée, sous respect des contrats d'interface} \\ \hline
+
+Personnalisation du moteur de détection &
+Selon capacités de la plateforme &
+Selon capacités de la plateforme &
+Élevée via règles et intégrations &
+Élevée via agents et règles &
+\textbf{Élevée : capteur réseau et chaîne de détection adaptables} \\ \hline
+
+Personnalisation du moteur ML &
+Propriétaire &
+Propriétaire &
+Selon composants utilisés &
+Selon composants utilisés &
+\textbf{Oui : modèle d'apprentissage remplaçable} \\ \hline
+
+Personnalisation du moteur LLM &
+Selon capacités de la plateforme &
+Selon capacités de la plateforme &
+Selon édition / intégrations &
+Selon intégrations &
+\textbf{Oui : runtime et modèle LLM interchangeables} \\ \hline
+
+Séparation physique des fonctions &
+Selon déploiement &
+Selon déploiement &
+Selon architecture &
+Selon architecture &
+\textbf{Oui : VM-Edge / VM-ML / VM-Response} \\ \hline
+
+Indépendance technologique &
+Faible à modérée &
+Faible à modérée &
+Élevée &
+Élevée &
+\textbf{Élevée : technologies remplaçables selon les interfaces du pipeline} \\ \hline
+
+\end{xltabular}
+
+
+
+
+
+\subsubsection{Interprétation.}
+
+L'analyse comparative met en évidence la diversité des capacités proposées par les solutions
+existantes de détection et de réponse aux incidents — détection par signatures, analyse
+comportementale, corrélation d'événements, exploitation du renseignement sur les menaces
+(\textit{Cyber Threat Intelligence -- CTI}) et automatisation de certaines actions d'investigation
+et de réponse — intégrées selon des architectures et des niveaux de couverture différents.
+
+Sur le plan de la détection, les approches traditionnelles conservent un rôle important pour
+l'identification déterministe des menaces connues, que les plateformes plus récentes complètent
+par des approches comportementales visant les activités difficilement caractérisables par des
+signatures statiques. L'intégration du renseignement sur les menaces constitue également une
+tendance importante, mais sa valeur opérationnelle dépend de la manière dont les informations
+CTI sont exploitées dans le cycle de détection et de réponse : enrichissement des événements,
+contextualisation des alertes, investigation ou adaptation des mécanismes de détection. La
+comparaison montre par ailleurs que l'automatisation dépasse progressivement le simple
+déclenchement d'alertes, certaines solutions intégrant des mécanismes d'orchestration, de
+corrélation et de confinement enchaînant plusieurs actions à partir d'un événement de sécurité.
+
+L'analyse du tableau met ainsi en évidence un enjeu architectural plutôt qu'une simple opposition
+entre solutions disposant ou non d'une fonctionnalité donnée : ces capacités peuvent exister
+individuellement dans plusieurs solutions, mais leur combinaison et leur niveau d'intégration au
+sein d'un même flux opérationnel diffèrent sensiblement. Le positionnement de NG-IDPS s'inscrit
+dans cette problématique d'intégration : le projet articule détection déterministe, analyse
+comportementale, CTI, analyse cognitive et réponse orchestrée au sein d'une chaîne cohérente,
+sans chercher à reproduire isolément une fonctionnalité déjà présente ailleurs. Ces éléments sont
+détaillés dans la section suivante, consacrée aux limites des solutions existantes et aux besoins
+spécifiques de NG-IDPS.
+
+
+
+\subsection{Limites des Solutions Existantes et Besoins Spécifiques du Projet}
+
+L'analyse comparative précédente montre que les solutions existantes couvrent, selon leur orientation, plusieurs capacités de détection, d'analyse, de renseignement, de corrélation et de réponse, mais que leur intégration, leur mode de déploiement et leur niveau d'automatisation diffèrent sensiblement. Pour NG-IDPS, l'objectif n'est donc pas de considérer ces fonctionnalités comme absentes des solutions existantes, mais d'identifier les contraintes résultant de leur combinaison dans un environnement on-premise et isolé. Le tableau~\ref{tab:besoins_ngidps} synthétise ces constats.
+
+% Prérequis dans le préambule :
+% \usepackage{xltabular}
+% \usepackage{array}
+% \usepackage[table]{xcolor}
+
+\renewcommand{\arraystretch}{1.5}
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|}
+
+\caption{Limites identifiées et besoins spécifiques de NG-IDPS}
+\label{tab:besoins_ngidps} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Constat} &
+\textbf{Limite ou contrainte} &
+\textbf{Besoin identifié pour NG-IDPS} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Constat} &
+\textbf{Limite ou contrainte} &
+\textbf{Besoin identifié pour NG-IDPS} \\ \hline
+\endhead
+
+Détection fondée sur les signatures et les règles &
+Difficulté à identifier certains comportements nouveaux ou ne correspondant pas à des signatures connues &
+Compléter la détection déterministe par une analyse comportementale fondée sur l'apprentissage automatique \\ \hline
+
+Multiplication des sources d'observation et d'alerte &
+Les événements issus de mécanismes de détection différents peuvent être analysés séparément, ce qui complique leur contextualisation et leur priorisation &
+Corréler plusieurs sources d'évidence au sein d'un mécanisme commun d'analyse et d'orchestration \\ \hline
+
+Détection comportementale et apprentissage automatique &
+Les anomalies produites par un modèle nécessitent une contextualisation et une interprétation avant de pouvoir être exploitées comme éléments de décision &
+Associer l'inférence comportementale à une étape d'analyse et de triage permettant d'interpréter les observations produites \\ \hline
+
+Utilisation de modèles d'intelligence artificielle &
+Nécessité de conserver la maîtrise des données traitées, du contexte d'analyse et des résultats produits dans un environnement de sécurité contraint &
+Privilégier une capacité d'analyse cognitive locale, intégrée au processus opérationnel du système \\ \hline
+
+Threat Intelligence et sources OSINT &
+L'exploitation opérationnelle des informations de renseignement dépend de leur intégration avec les mécanismes de détection et d'analyse &
+Intégrer la CTI/OSINT dans une boucle d'analyse permettant l'enrichissement, la contextualisation et, lorsque les conditions sont réunies, l'adaptation contrôlée des mécanismes de détection \\ \hline
+
+Automatisation de la réponse &
+Une action de réponse fondée sur une observation isolée peut présenter un risque de réponse disproportionnée ou d'affectation d'un actif légitime &
+Soumettre les actions de réponse à des règles de décision, à la corrélation des éléments d'évidence et à des mécanismes de protection \\ \hline
+
+Fonctionnement opérationnel d'un SOC &
+Certaines décisions de sécurité nécessitent une interprétation humaine, alors que certaines actions répétitives peuvent être automatisées sous conditions &
+Permettre une automatisation contrôlée des actions de réponse tout en conservant des mécanismes d'intervention et de validation humaine lorsque cela est nécessaire \\ \hline
+
+Environnement on-premise et réseau isolé &
+Contraintes liées à la maîtrise de l'infrastructure, à la circulation des données et à la dépendance vis-à-vis de services externes &
+Concevoir une architecture déployable localement et adaptée à un environnement réseau isolé \\ \hline
+
+Évolution et remplacement des composants &
+L'évolution des mécanismes de détection, d'analyse ou de réponse peut nécessiter le remplacement de composants technologiques &
+Maintenir une architecture modulaire fondée sur des interfaces et des responsabilités fonctionnelles clairement définies \\ \hline
+
+\end{xltabular}
+
+
+Ces constats conduisent à retenir, pour NG-IDPS, une architecture fondée sur la complémentarité de plusieurs mécanismes plutôt que sur un détecteur unique : détection déterministe, analyse comportementale, corrélation de plusieurs sources d'évidence, exploitation de la CTI, analyse cognitive et réponse orchestrée soumise à des politiques de sécurité. Cette combinaison doit rester compatible avec les contraintes de déploiement du projet et préserver la modularité du système : les technologies retenues constituent des implémentations des différentes fonctions de l'architecture, organisées autour de responsabilités et d'interfaces fonctionnelles permettant leur évolution ou leur remplacement.
+
+Ces besoins constituent la base du positionnement de NG-IDPS, développé ci-après en relation avec les limites identifiées et les exigences dégagées de l'étude de l'existant.
+
+\subsection{Positionnement de NG-IDPS}
+
+À partir des besoins identifiés, NG-IDPS se positionne comme une architecture intégrée et modulaire de détection, d'analyse et de réponse, associant détection déterministe par signatures, analyse comportementale par apprentissage automatique, analyse cognitive locale des incidents et orchestration. Cette dernière assure notamment la corrélation des alertes et des informations issues des différents mécanismes de détection, l'application des politiques de sécurité et le déclenchement des réponses prévues. L'approche repose sur une séparation claire des responsabilités : la détection fournit les premières observations, l'analyse comportementale apporte une perspective complémentaire, l'orchestration assure la corrélation et la mise en œuvre des politiques de réponse, tandis que l'analyse cognitive contextualise et structure les informations relatives aux incidents sans constituer à elle seule le mécanisme de décision.
+
+NG-IDPS est conçu pour fonctionner dans un environnement on-premise isolé tout en conservant une organisation modulaire. Les technologies retenues constituent des implémentations de référence des différentes fonctions du système et peuvent être remplacées lorsque le composant substitué respecte les interfaces et les contraintes attendues par l'architecture. Le positionnement du projet repose ainsi moins sur une fonctionnalité technologique isolée que sur l'intégration cohérente de mécanismes complémentaires au sein d'une même chaîne opérationnelle.
+
+
+
+
+%========================================
+
+\section{Méthodologie adoptée}
+
+%========================================
+
+Compte tenu de la diversité des fonctionnalités à développer, de l'intégration progressive de plusieurs technologies et de la nécessité de valider régulièrement les différentes composantes du système, une approche agile inspirée du framework Scrum a été retenue pour mener le projet NG-IDPS. Cette approche est adaptée au caractère évolutif du projet et permet d'organiser le développement selon une progression incrémentale.
+
+\subsection{Méthodologie retenue}
+
+L'approche Agile a été choisie pour sa capacité à accompagner un développement progressif et itératif. Contrairement à une approche strictement séquentielle, dans laquelle l'ensemble des besoins et des choix techniques sont définis en amont, elle permet de construire la solution par étapes, de valider les fonctionnalités au fur et à mesure et d'ajuster les priorités en fonction des résultats obtenus.
+
+Cette approche est particulièrement adaptée à NG-IDPS, dont l'architecture repose sur plusieurs composantes interdépendantes, notamment l'acquisition réseau, le traitement des flux, la détection comportementale, l'orchestration SOAR, l'analyse cognitive, la CTI et la supervision. Le développement est ainsi organisé autour de cycles courts alternant analyse, conception, implémentation, intégration et validation. Cette organisation facilite l'identification précoce des difficultés techniques et permet d'ajuster progressivement les choix d'implémentation.
+
+\subsection{Méthodologie Scrum}
+
+Le framework Scrum structure le développement sous forme d'itérations successives appelées \textit{Sprints}, chacune étant associée à un ensemble d'objectifs et de fonctionnalités clairement définis. Dans le cadre de ce projet individuel, les principes de Scrum sont adaptés afin de conserver une organisation itérative, une priorisation explicite du travail et une validation régulière des résultats.
+
+Le développement de NG-IDPS a été organisé autour de deux \textit{Releases}, correspondant aux deux axes fonctionnels principaux du projet : la \textbf{détection intelligente}, comprenant l'acquisition des événements réseau, le pipeline de données et la détection comportementale par LSTM-VAE, et la \textbf{prévention et la réponse}, comprenant l'orchestration SOAR, l'analyse cognitive par LLM, les mécanismes de contrôle de sécurité, la Threat Intelligence, la formation contextualisée, la supervision et l'automatisation de la réponse.
+
+Cette organisation permet de construire progressivement la plateforme, depuis l'acquisition et l'analyse des événements jusqu'à la mise en œuvre d'actions de prévention et de réponse.
+
+\subsection{Organisation des Sprints}
+
+Sur une durée de projet de six mois, le travail a été réparti en six Sprints mensuels, regroupés en deux Releases comme présenté dans le tableau suivant.
+
+% Prérequis dans le préambule :
+% \usepackage{xltabular}
+% \usepackage{multirow}
+% \usepackage[table]{xcolor}
+
+\renewcommand{\arraystretch}{1.5}
+\begin{xltabular}{\textwidth}{|c|c|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|}
+
+\caption{Organisation des Sprints du projet NG-IDPS}
+\label{tab:organisation_sprints} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Release} & \textbf{Sprint} & \textbf{Thématique} & \textbf{Principales activités} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Release} & \textbf{Sprint} & \textbf{Thématique} & \textbf{Principales activités} \\ \hline
+\endhead
+
+\multirow{3}{*}{\shortstack{\textbf{Release 1} \\ \textbf{Détection}}}
+& \textbf{Sprint 1} & Acquisition réseau &
+Mise en place de Suricata, collecte des événements EVE JSON et développement de la chaîne d'acquisition réseau. \\ \cline{2-4}
+
+& \textbf{Sprint 2} & Pipeline de données &
+Mise en place du streaming des événements, traitement des flux et intégration de Kafka dans la chaîne de communication. \\ \cline{2-4}
+
+& \textbf{Sprint 3} & Détection comportementale &
+Sélection et préparation des caractéristiques, entraînement du LSTM-VAE, calibration du seuil d'anomalie et mise en œuvre de l'inférence en flux continu. \\ \hline
+
+\multirow{3}{*}{\shortstack{\textbf{Release 2} \\ \textbf{Prévention et réponse}}}
+& \textbf{Sprint 4} & Anticipation par le renseignement &
+Intégration de l'agent CTI et du triage Dual-RAG, génération automatique de règles Suricata candidates et aiguillage du renseignement vers la sensibilisation. \\ \hline \cline{2-4}
+
+& \textbf{Sprint 5} & Mitigation du risque humain &
+Intégration de l'agent Gemini et de la plateforme RAG LMS, génération de parcours de sensibilisation ciblés et suivi de conformité des employés. \\ \cline{2-4}
+
+& \textbf{Sprint 6} & Orchestration SOAR multi-paliers et supervision &
+Mise en œuvre de la corrélation des alertes, de l'orchestration SOAR autonome et supervisée, de l'agent d'analyse post-attaque et du tableau de bord SOC. \\ \hline
+
+\end{xltabular}
+Cette organisation permet de faire évoluer progressivement le système d'une fonction de détection vers une plateforme intégrant également des capacités de prévention, de réponse et d'exploitation du renseignement sur les menaces. Elle facilite également l'intégration progressive des différents composants en limitant la complexité de chaque étape de développement.
+
+\subsection{Les rôles au sein de Scrum}
+
+Le framework Scrum définit plusieurs responsabilités permettant d'assurer une organisation claire du travail. Dans le cadre d'un projet réalisé individuellement, ces responsabilités sont adaptées au contexte académique du projet tout en conservant leur distinction conceptuelle.
+
+% Prérequis dans le préambule :
+% \usepackage{xltabular}
+% \usepackage{array}
+% \usepackage[table]{xcolor}
+
+\renewcommand{\arraystretch}{1.5}
+\begin{xltabular}{\textwidth}{|l|>{\raggedright\arraybackslash}X|}
+
+\caption{Rôles Scrum dans le cadre du projet}
+\label{tab:roles_scrum} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Rôle} & \textbf{Responsabilités dans le projet} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Rôle} & \textbf{Responsabilités dans le projet} \\ \hline
+\endhead
+
+\textbf{Product Owner} &
+Définition et priorisation des fonctionnalités à développer, identification des besoins fonctionnels et techniques, suivi des objectifs de chaque Sprint et validation des fonctionnalités réalisées. \\ \hline
+
+\textbf{Scrum Master} &
+Organisation du processus de développement, suivi de l'avancement des Sprints, identification des obstacles techniques et maintien d'une démarche de travail itérative. \\ \hline
+
+\textbf{Développeur} &
+Analyse, conception, implémentation, intégration, tests et documentation des différents composants de la plateforme NG-IDPS. \\ \hline
+
+\end{xltabular}
+
+Dans le contexte d'un projet réalisé individuellement, ces rôles sont assumés par le même membre du projet, tout en conservant leur séparation conceptuelle afin de maintenir une structure de travail inspirée de Scrum : suivi des priorités, planification des itérations, identification des obstacles et validation progressive des fonctionnalités.
+
+\subsection{Processus de développement adopté}
+
+Chaque Sprint suit un cycle itératif comprenant la définition des objectifs, l'analyse et la conception, l'implémentation, l'intégration, les tests et la validation des fonctionnalités réalisées. À la fin de chaque itération, les résultats sont examinés afin d'identifier les éléments réalisés, les difficultés rencontrées et les ajustements nécessaires pour le cycle suivant. Cette organisation permet de détecter plus tôt les problèmes techniques et de réduire les risques liés à une intégration tardive des composants.
+
+La méthodologie adoptée structure ainsi le développement de NG-IDPS autour d'une progression incrémentale, en cohérence avec les objectifs fonctionnels, les choix architecturaux et les contraintes techniques du projet.
+
+\section{Conclusion}
+
+Ce premier chapitre a situé le projet NG-IDPS dans le contexte actuel de la cybersécurité et mis en évidence les principaux enjeux liés à la détection et à la prévention des intrusions réseau. L'analyse du contexte et de la problématique a montré que l'évolution des menaces justifie de compléter les mécanismes de détection déterministe par des approches capables de prendre en compte les comportements connus, les anomalies et les informations issues de sources complémentaires. L'étude des solutions existantes a ensuite permis d'identifier les différentes approches adoptées en matière de détection, d'analyse, de Threat Intelligence et de réponse aux incidents, ainsi que les besoins spécifiques liés à leur intégration dans un environnement local et isolé et au contrôle des mécanismes d'automatisation.
+
+De ces constats découlent les besoins retenus pour NG-IDPS : associer détection par signatures et analyse comportementale, corréler plusieurs sources d'évidence, intégrer une analyse cognitive locale, exploiter la Threat Intelligence dans le cycle opérationnel et automatiser certaines actions de réponse sous des politiques de sécurité et des mécanismes de contrôle. Ces capacités sont intégrées au sein d'une architecture modulaire permettant l'évolution ou le remplacement des composants technologiques lorsque les interfaces et les fonctions attendues sont préservées.
+
+NG-IDPS est ainsi positionné comme une architecture intégrée articulant détection déterministe, détection comportementale, orchestration SOAR, analyse cognitive, CTI et mécanismes de prévention, tout en intégrant un volet de sensibilisation contextualisée. L'ensemble établit une continuité entre l'observation du trafic, l'identification des comportements suspects, l'interprétation des incidents et l'application contrôlée des réponses, au sein d'une architecture distribuée fondée sur des interfaces fonctionnelles dédiées. Cette étude constitue ainsi la base conceptuelle de la solution proposée ; le chapitre suivant en définit l'architecture globale, l'organisation des composants et les principaux flux de données.

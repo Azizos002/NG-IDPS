@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { GraduationCap, BookOpen, Activity, CheckSquare, Mail, Users, Shield, Clock, ChevronRight, CheckCircle, XCircle, Lock } from "lucide-react";
+import { GraduationCap, BookOpen, Activity, CheckSquare, Mail, Users, Shield, Clock, ChevronRight, CheckCircle, XCircle, Lock, Cloud, Cpu, AlertTriangle, Waypoints } from "lucide-react";
 import mermaid from "mermaid";
+import { toast } from "sonner";
 
 // ============================================================================
 // COMPOSANT : LECTEUR MERMAID.JS (Rendu interactif des cinématiques d'attaque)
@@ -24,6 +25,121 @@ const MermaidDiagram = ({ chart }: { chart: string }) => {
 
   return <div ref={containerRef} className="flex justify-center overflow-x-auto py-6" />;
 };
+
+// ============================================================================
+// RÉSILIENCE IA : Traçabilité du fournisseur (Gemini -> Mistral -> Llama3.2 local)
+// Le backend (chaîne de fallback dans server.js) stocke le fournisseur qui a
+// effectivement généré chaque formation dans formation_data._meta_provider,
+// au format "provider:model" (ex: "gemini:gemini-2.5-flash", "ollama:llama3.2").
+// L'ordre des tiers est fixe : tout ce qui n'est pas Gemini signifie qu'une
+// bascule (fallback) a eu lieu suite à une indisponibilité du(des) fournisseur(s)
+// précédent(s) dans la chaîne.
+// ============================================================================
+type ProviderTier = "PRIMARY" | "FALLBACK_CLOUD" | "FALLBACK_LOCAL" | "UNKNOWN";
+
+interface ProviderMeta {
+  tier: ProviderTier;
+  label: string;
+  modelLabel: string;
+  Icon: typeof Cloud;
+  badgeClass: string;
+  isFallback: boolean;
+  fallbackNote: string | null;
+}
+
+const getProviderMeta = (metaProvider?: string | null): ProviderMeta => {
+  if (!metaProvider) {
+    return {
+      tier: "UNKNOWN",
+      label: "Fournisseur inconnu",
+      modelLabel: "Généré avant activation du suivi IA",
+      Icon: Waypoints,
+      badgeClass: "bg-slate-800 text-slate-400 border-slate-700",
+      isFallback: false,
+      fallbackNote: null,
+    };
+  }
+
+  const [provider, model] = metaProvider.split(":");
+
+  if (provider === "gemini") {
+    return {
+      tier: "PRIMARY",
+      label: "Gemini (Cloud · Primaire)",
+      modelLabel: model || "gemini",
+      Icon: Cloud,
+      badgeClass: "bg-cyan-500/10 text-cyan-300 border-cyan-500/30",
+      isFallback: false,
+      fallbackNote: null,
+    };
+  }
+
+  if (provider === "mistral") {
+    return {
+      tier: "FALLBACK_CLOUD",
+      label: "Mistral (Cloud · Secours)",
+      modelLabel: model || "mistral",
+      Icon: AlertTriangle,
+      badgeClass: "bg-amber-500/10 text-amber-300 border-amber-500/30",
+      isFallback: true,
+      fallbackNote: "Bascule automatique : Gemini était indisponible (quota ou surcharge), la formation a été générée par Mistral.",
+    };
+  }
+
+  if (provider === "ollama") {
+    return {
+      tier: "FALLBACK_LOCAL",
+      label: "Llama3.2 (Local · Dernier recours)",
+      modelLabel: model || "llama3.2",
+      Icon: Cpu,
+      badgeClass: "bg-rose-500/10 text-rose-300 border-rose-500/30",
+      isFallback: true,
+      fallbackNote: "Bascule automatique : Gemini et Mistral étaient tous deux indisponibles, la formation a été générée en local (Ollama / Llama3.2) pour garantir la continuité du service.",
+    };
+  }
+
+  return {
+    tier: "UNKNOWN",
+    label: provider || "Fournisseur inconnu",
+    modelLabel: model || "",
+    Icon: Waypoints,
+    badgeClass: "bg-slate-800 text-slate-400 border-slate-700",
+    isFallback: false,
+    fallbackNote: null,
+  };
+};
+
+// Petite pastille compacte pour la liste latérale des formations (vue admin uniquement)
+const ProviderPill = ({ metaProvider }: { metaProvider?: string | null }) => {
+  const meta = getProviderMeta(metaProvider);
+  const { Icon } = meta;
+  return (
+    <span className={`inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded border ${meta.badgeClass}`}>
+      <Icon size={10} /> {meta.modelLabel || meta.label}
+    </span>
+  );
+};
+
+// Badge détaillé affiché dans l'en-tête du cours actif (vue admin uniquement)
+const ProviderBadge = ({ metaProvider }: { metaProvider?: string | null }) => {
+  const meta = getProviderMeta(metaProvider);
+  const { Icon } = meta;
+  return (
+    <div className={`flex flex-col gap-1.5 px-3 py-2 rounded-xl border text-[11px] max-w-xs ${meta.badgeClass}`}>
+      <div className="flex items-center gap-2 font-bold">
+        <Icon size={14} />
+        <span>{meta.label}</span>
+      </div>
+      <span className="opacity-70 font-mono text-[10px]">{meta.modelLabel}</span>
+      {meta.isFallback && meta.fallbackNote && (
+        <p className="text-[10px] leading-snug opacity-90 border-t border-current/20 pt-1.5 mt-0.5">
+          {meta.fallbackNote}
+        </p>
+      )}
+    </div>
+  );
+};
+
 
 // ============================================================================
 // PAGE PRINCIPALE : HUB DE FORMATION
@@ -104,6 +220,13 @@ export default function FormationsPage() {
 
   // Gestion du changement de cours
   const handleSelectFormation = (formation: any) => {
+    // En mode Suivi : un clic sur le catalogue filtre le registre sur ce
+    // module, sans quitter la vue d'audit (comportement différent du mode
+    // Catalogue classique, qui ouvre le lecteur de cours).
+    if (viewMode === "SUIVI") {
+      setFilterModule(formation.formation_data?.titre_cours || formation.titre_menace);
+      return;
+    }
     setActiveFormation(formation);
     setQuizState({});
     setQuizSubmitted(false);
@@ -176,7 +299,7 @@ export default function FormationsPage() {
   // --- NOUVEAU : Authentification de l'employé pour déverrouiller le cours ---
   const [employeeAuth, setEmployeeAuth] = useState<any>(null);
   const [employeeIdInput, setEmployeeIdInput] = useState("");
-  const [authError, setAuthError] = useState("");
+  // const [authError, setAuthError] = useState("");
 
   // --- NOUVEAU : Progression type Coursera (Step-by-step) ---
   const [isStudentMode, setIsStudentMode] = useState(false);
@@ -188,6 +311,21 @@ export default function FormationsPage() {
   // --- NOUVEAU : États pour le tableau de bord des scores ---
   const [viewMode, setViewMode] = useState<"CATALOGUE" | "SUIVI">("CATALOGUE");
   const [records, setRecords] = useState<any[]>([]);
+
+  // --- Filtres du Registre de Conformité ---
+  const [filterModule, setFilterModule] = useState<string>("");     // titre du module (pré-rempli par clic catalogue)
+  const [filterDept, setFilterDept] = useState<string>("");          // département exact
+  const [filterSearch, setFilterSearch] = useState<string>("");      // recherche libre (nom/ID employé)
+
+  const filteredRecords = records.filter((rec) => {
+    const matchModule = !filterModule || rec.courseTitle === filterModule;
+    const matchDept = !filterDept || rec.department === filterDept;
+    const matchSearch =
+      !filterSearch ||
+      rec.employeeName?.toLowerCase().includes(filterSearch.toLowerCase()) ||
+      rec.employeeId?.toLowerCase().includes(filterSearch.toLowerCase());
+    return matchModule && matchDept && matchSearch;
+  });
 
   const fetchRecords = async () => {
     try {
@@ -214,22 +352,28 @@ export default function FormationsPage() {
 
   const handleEmployeeLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setAuthError("");
     try {
       const currentHost = window.location.hostname;
       const response = await fetch(`http://${currentHost}:4000/api/employes/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id_employe: employeeIdInput }),
+        body: JSON.stringify({ id_employe: employeeIdInput, courseId: activeFormation._id }),
       });
       const data = await response.json();
       if (data.success) {
         setEmployeeAuth(data.employe);
+        toast.success(`Bienvenue, ${data.employe.nom}`, {
+          description: "Accès au module de formation accordé.",
+        });
       } else {
-        setAuthError(data.error);
+        if (response.status === 403) {
+          toast.warning("Accès non autorisé", { description: data.error });
+        } else {
+          toast.error("Échec de connexion", { description: data.error });
+        }
       }
     } catch (err) {
-      setAuthError("Erreur de connexion au serveur.");
+      toast.error("Erreur de connexion", { description: "Impossible de contacter le serveur. Réessayez." });
     }
   };
 
@@ -248,7 +392,7 @@ export default function FormationsPage() {
           courseTitle: activeFormation.formation_data?.titre_cours || activeFormation.titre_menace,
           employeeId: employeeAuth.id_employe,
           employeeName: employeeAuth.nom,
-          department: employeeAuth.poste,
+          department: employeeAuth.departement,
           score: finalScore
         })
       });
@@ -314,7 +458,11 @@ export default function FormationsPage() {
                 <p className="text-sm text-slate-500 text-center mt-10">Aucun module généré pour le moment.</p>
               ) : (
                 formations.map((form) => {
-                  const isActive = activeFormation?._id === form._id;
+                  const titreForm = form.formation_data?.titre_cours || form.titre_menace;
+                  const isActive =
+                    viewMode === "SUIVI"
+                      ? filterModule === titreForm
+                      : activeFormation?._id === form._id;
                   return (
                     <button
                       key={form._id}
@@ -336,6 +484,9 @@ export default function FormationsPage() {
                       <p className="text-[10px] text-slate-500 mt-2 flex items-center gap-1.5">
                         <Clock size={11} /> Généré le {new Date(form.last_updated).toLocaleDateString()}
                       </p>
+                      <div className="mt-2">
+                        <ProviderPill metaProvider={form.formation_data?._meta_provider} />
+                      </div>
                     </button>
                   );
                 })
@@ -353,6 +504,45 @@ export default function FormationsPage() {
               <h2 className="text-2xl font-black text-slate-100 mb-6 flex items-center gap-3">
                 <Users className="text-emerald-400" /> Registre de Conformité (Auditing)
               </h2>
+
+              {/* --- Barre de filtres --- */}
+              <div className="flex flex-wrap items-center gap-3 mb-4">
+                <input
+                  type="text"
+                  value={filterSearch}
+                  onChange={(e) => setFilterSearch(e.target.value)}
+                  placeholder="Rechercher un employé (nom ou ID)..."
+                  className="flex-1 min-w-[220px] bg-[#050810] border border-slate-700 text-sm text-slate-200 rounded-lg px-3 py-2 focus:border-purple-500 outline-none"
+                />
+                <select
+                  value={filterDept}
+                  onChange={(e) => setFilterDept(e.target.value)}
+                  className="bg-[#050810] border border-slate-700 text-sm text-slate-200 rounded-lg px-3 py-2 focus:border-purple-500 outline-none"
+                >
+                  <option value="">Tous les départements</option>
+                  {departements.map((dep) => (
+                    <option key={dep} value={dep}>{dep}</option>
+                  ))}
+                </select>
+                {filterModule && (
+                  <button
+                    onClick={() => setFilterModule("")}
+                    className="flex items-center gap-1.5 text-xs font-bold bg-purple-900/30 border border-purple-500/40 text-purple-300 rounded-lg px-3 py-2 hover:bg-purple-900/50"
+                  >
+                    {filterModule.length > 30 ? filterModule.slice(0, 30) + "…" : filterModule}
+                    <XCircle size={14} />
+                  </button>
+                )}
+                {(filterDept || filterSearch || filterModule) && (
+                  <button
+                    onClick={() => { setFilterDept(""); setFilterSearch(""); setFilterModule(""); }}
+                    className="text-xs text-slate-500 hover:text-slate-300 underline"
+                  >
+                    Réinitialiser
+                  </button>
+                )}
+              </div>
+
               <div className="bg-[#050810] border border-slate-800 rounded-xl flex-1 overflow-hidden flex flex-col">
                 <div className="overflow-y-auto flex-1 p-4 custom-scrollbar">
                   <table className="w-full text-left text-sm text-slate-300">
@@ -366,10 +556,10 @@ export default function FormationsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {records.length === 0 ? (
-                        <tr><td colSpan={5} className="text-center py-8 text-slate-500 font-medium">Aucun résultat enregistré pour le moment.</td></tr>
+                      {filteredRecords.length === 0 ? (
+                        <tr><td colSpan={5} className="text-center py-8 text-slate-500 font-medium">Aucun résultat ne correspond à ces filtres.</td></tr>
                       ) : (
-                        records.map((rec) => (
+                        filteredRecords.map((rec) => (
                           <tr key={rec._id} className="border-b border-slate-800/50 hover:bg-slate-900/30">
                             <td className="px-4 py-4 font-bold text-slate-200">{rec.employeeName} <br /><span className="text-[10px] text-slate-500 font-normal">{rec.employeeId}</span></td>
                             <td className="px-4 py-4 text-xs">{rec.department}</td>
@@ -402,6 +592,11 @@ export default function FormationsPage() {
                   <p className="text-sm text-slate-400 flex items-center gap-2">
                     Basé sur l'alerte : <span className="text-purple-400 font-semibold">{activeFormation.titre_menace}</span>
                   </p>
+                  {isAdmin && !isStudentMode && (
+                    <div className="mt-3">
+                      <ProviderBadge metaProvider={activeFormation.formation_data?._meta_provider} />
+                    </div>
+                  )}
                 </div>
 
                 {/* Sélecteur de ciblage & Bouton de Diffusion Email (Invisible pour l'étudiant) */}
@@ -481,7 +676,7 @@ export default function FormationsPage() {
                         placeholder="Ex: EMP-FIN-001"
                         className="bg-[#050810] border border-slate-700 text-center text-slate-200 text-lg font-bold tracking-widest rounded-xl py-3 focus:border-purple-500 outline-none"
                       />
-                      {authError && <span className="text-rose-500 text-xs font-bold text-center">{authError}</span>}
+                      {/* {authError && <span className="text-rose-500 text-xs font-bold text-center">{authError}</span>} */}
                       <button type="submit" className="bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 rounded-xl shadow-[0_0_15px_rgba(168,85,247,0.3)]">
                         DÉVERROUILLER LE COURS
                       </button>

@@ -2,17 +2,39 @@
 
 import { useState, useEffect, useRef } from "react";
 import { io } from "socket.io-client";
-import { Bell, CheckCheck, ShieldAlert, Clock, Activity, ShieldCheck } from "lucide-react";
+import { Bell, CheckCheck, ShieldAlert, Clock, Activity, ShieldCheck, GraduationCap, AlertTriangle } from "lucide-react";
 import Link from "next/link";
+
+// "INCIDENT" = alerte de sécurité (comportement existant, inchangé)
+// "FORMATION" = notification de fin de génération d'un module de Micro-Learning
+type NotificationKind = "INCIDENT" | "FORMATION";
 
 interface SOCNotification {
     id: string;
+    kind: NotificationKind;
     type: string;
-    ip: string;
-    sensor: string;
     timestamp: string;
     read: boolean;
+    // Champs spécifiques aux incidents (INCIDENT)
+    ip?: string;
+    sensor?: string;
+    // Champs spécifiques aux formations (FORMATION)
+    ruleId?: string;
+    provider?: string;
+    isFallback?: boolean;
 }
+
+// Libellé court du fournisseur IA pour affichage compact dans la notification.
+// Repose sur le même préfixe "provider:model" que formation_data._meta_provider
+// (voir server.js — chaîne de résilience Gemini -> Mistral -> Llama3.2 local).
+const getProviderLabel = (provider?: string): string => {
+    if (!provider) return "Fournisseur inconnu";
+    const [p] = provider.split(":");
+    if (p === "gemini") return "Gemini";
+    if (p === "mistral") return "Mistral (secours cloud)";
+    if (p === "ollama") return "Llama3.2 local (secours)";
+    return p;
+};
 
 export default function NotificationCenter() {
     const [isOpen, setIsOpen] = useState(false);
@@ -30,7 +52,7 @@ export default function NotificationCenter() {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
-    // Écoute des attaques via WebSocket
+    // Écoute des attaques + des formations générées via WebSocket
     useEffect(() => {
         const currentHost = window.location.hostname;
         const socket = io(`http://${currentHost}:4000`);
@@ -38,9 +60,25 @@ export default function NotificationCenter() {
         socket.on("soar_incident_incoming", (data: any) => {
             const newNotif: SOCNotification = {
                 id: data._id || Math.random().toString(36).substring(7),
+                kind: "INCIDENT",
                 type: data.threatType || "Alerte de Sécurité",
                 ip: data.maliciousIp || "IP Inconnue",
                 sensor: data.sourceSensor || "Core-IDS",
+                timestamp: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
+                read: false,
+            };
+            setNotifications((prev) => [newNotif, ...prev]);
+        });
+
+        // Émis par server.js à la fin de /api/formations/generate (chaîne Gemini -> Mistral -> Llama3.2 local)
+        socket.on("formation_generated", (data: any) => {
+            const newNotif: SOCNotification = {
+                id: data.rule_id || Math.random().toString(36).substring(7),
+                kind: "FORMATION",
+                type: data.titre_cours || "Formation générée",
+                ruleId: data.rule_id,
+                provider: data.provider,
+                isFallback: !!data.isFallback,
                 timestamp: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
                 read: false,
             };
@@ -81,7 +119,7 @@ export default function NotificationCenter() {
 
             {/* Panneau de Notifications */}
             {isOpen && (
-                <div className="absolute left-0 mt-3 w-80 sm:w-96 bg-slate-900/95 backdrop-blur-xl border border-slate-700 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="absolute right-0 mt-3 w-80 sm:w-96 bg-slate-900/95 backdrop-blur-xl border border-slate-700 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
 
                     {/* Header du panneau */}
                     <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950/50">
@@ -110,40 +148,104 @@ export default function NotificationCenter() {
                             </div>
                         ) : (
                             <div className="flex flex-col">
-                                {notifications.map((notif) => (
-                                    <div
-                                        key={notif.id}
-                                        onClick={() => markAsRead(notif.id)}
-                                        className={`relative p-4 border-b border-slate-800/50 cursor-pointer transition-all hover:bg-slate-800/50 group ${notif.read ? "opacity-60 bg-transparent" : "bg-red-500/5"
-                                            }`}
-                                    >
-                                        {/* Ligne rouge latérale pour les non-lus */}
-                                        {!notif.read && (
-                                            <div className="absolute left-0 top-0 bottom-0 w-1 bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]"></div>
-                                        )}
+                                {notifications.map((notif) => {
+                                    const isFormation = notif.kind === "FORMATION";
 
-                                        <div className="flex gap-3">
-                                            <div className={`mt-0.5 p-1.5 rounded-full h-fit ${notif.read ? "bg-slate-800 text-slate-400" : "bg-red-950 text-red-500"}`}>
-                                                <ShieldAlert size={16} />
-                                            </div>
-                                            <div className="flex-1">
-                                                <div className="flex justify-between items-start mb-1">
-                                                    <p className={`text-sm font-bold ${notif.read ? "text-slate-300" : "text-white"}`}>
-                                                        {notif.type}
-                                                    </p>
-                                                    <span className="text-[10px] flex items-center gap-1 text-slate-500 font-mono">
-                                                        <Clock size={10} /> {notif.timestamp}
-                                                    </span>
+                                    // Couleurs : incidents = rouge (inchangé) ; formations = émeraude en succès direct
+                                    // (Gemini), ambre si une bascule IA (fallback) a eu lieu — cohérent avec le badge
+                                    // ProviderBadge déjà affiché dans le Hub de Formation (page.tsx).
+                                    const accentClass = !isFormation
+                                        ? "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]"
+                                        : notif.isFallback
+                                            ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.8)]"
+                                            : "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]";
+
+                                    const iconWrapClass = !isFormation
+                                        ? notif.read ? "bg-slate-800 text-slate-400" : "bg-red-950 text-red-500"
+                                        : notif.read
+                                            ? "bg-slate-800 text-slate-400"
+                                            : notif.isFallback
+                                                ? "bg-amber-950 text-amber-500"
+                                                : "bg-emerald-950 text-emerald-500";
+
+                                    const ItemIcon = !isFormation ? ShieldAlert : notif.isFallback ? AlertTriangle : GraduationCap;
+
+                                    const content = (
+                                        <>
+                                            {/* Ligne latérale de couleur pour les non-lus */}
+                                            {!notif.read && (
+                                                <div className={`absolute left-0 top-0 bottom-0 w-1 ${accentClass}`}></div>
+                                            )}
+
+                                            <div className="flex gap-3">
+                                                <div className={`mt-0.5 p-1.5 rounded-full h-fit ${iconWrapClass}`}>
+                                                    <ItemIcon size={16} />
                                                 </div>
-                                                <p className="text-xs text-slate-400 font-mono flex items-center gap-2">
-                                                    <span className="text-red-400/80">{notif.ip}</span>
-                                                    <span className="text-slate-600">•</span>
-                                                    <span className="text-cyan-500/70">{notif.sensor}</span>
-                                                </p>
+                                                <div className="flex-1">
+                                                    <div className="flex justify-between items-start mb-1">
+                                                        <p className={`text-sm font-bold ${notif.read ? "text-slate-300" : "text-white"}`}>
+                                                            {isFormation && "🎓 "}{notif.type}
+                                                        </p>
+                                                        <span className="text-[10px] flex items-center gap-1 text-slate-500 font-mono">
+                                                            <Clock size={10} /> {notif.timestamp}
+                                                        </span>
+                                                    </div>
+                                                    {isFormation ? (
+                                                        <p className="text-xs text-slate-400 font-mono flex items-center gap-2">
+                                                            <span className={notif.isFallback ? "text-amber-400/80" : "text-emerald-400/80"}>
+                                                                {getProviderLabel(notif.provider)}
+                                                            </span>
+                                                            {notif.isFallback && (
+                                                                <>
+                                                                    <span className="text-slate-600">•</span>
+                                                                    <span className="text-amber-500/80">Bascule IA</span>
+                                                                </>
+                                                            )}
+                                                        </p>
+                                                    ) : (
+                                                        <p className="text-xs text-slate-400 font-mono flex items-center gap-2">
+                                                            <span className="text-red-400/80">{notif.ip}</span>
+                                                            <span className="text-slate-600">•</span>
+                                                            <span className="text-cyan-500/70">{notif.sensor}</span>
+                                                        </p>
+                                                    )}
+                                                </div>
                                             </div>
+                                        </>
+                                    );
+
+                                    const itemClassName = `relative p-4 border-b border-slate-800/50 cursor-pointer transition-all hover:bg-slate-800/50 group ${
+                                        notif.read ? "opacity-60 bg-transparent" : isFormation ? (notif.isFallback ? "bg-amber-500/5" : "bg-emerald-500/5") : "bg-red-500/5"
+                                    }`;
+
+                                    // Pour une formation, cliquer ouvre directement le cours concerné dans le Hub de
+                                    // Formation (page.tsx lit déjà ?courseId=... pour sélectionner le module ciblé).
+                                    if (isFormation && notif.ruleId) {
+                                        return (
+                                            <Link
+                                                key={notif.id}
+                                                href={`/formations?courseId=${notif.ruleId}`}
+                                                onClick={() => {
+                                                    markAsRead(notif.id);
+                                                    setIsOpen(false);
+                                                }}
+                                                className={itemClassName}
+                                            >
+                                                {content}
+                                            </Link>
+                                        );
+                                    }
+
+                                    return (
+                                        <div
+                                            key={notif.id}
+                                            onClick={() => markAsRead(notif.id)}
+                                            className={itemClassName}
+                                        >
+                                            {content}
                                         </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
                     </div>

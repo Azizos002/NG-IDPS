@@ -1,0 +1,699 @@
+% ==============================================================================
+% CHAPITRE 3 : DÉPLOIEMENT DU SOCLE DE DÉTECTION MULTI-NIVEAUX (RELEASE 1)
+% ==============================================================================
+
+\chapter{Détection - Ingestion parallèle et moteur stochastique (Release 1)}
+\label{chap:release1}
+
+\minitoc
+\newpage
+
+%========================================
+\section{Introduction}
+%========================================
+
+La validation théorique de la modélisation architecturale abordée au chapitre précédent marque la fin de la phase préparatoire et le début de l'implémentation opérationnelle de notre plateforme de cyberdéfense. Ce troisième chapitre est consacré à l'ingénierie détaillée de la \textit{Release 1}, qui matérialise le \textbf{Plan de Données (\textit{Data Plane})} de notre architecture distribuée.
+
+Dans le contexte des réseaux à très haut débit et des menaces polymorphes, la robustesse de toute couche d'Intelligence Artificielle dépend fondamentalement de la fidélité, de la vélocité et de l'intégrité des informations qu'elle ingère. La littérature scientifique démontre qu'une IA, aussi optimisée soit-elle, échouera face à une architecture d'acquisition souffrant de perte de paquets (\textit{Packet Drop}) ou de congestion de flux \cite{brauckhoff2010impact}. Cette première itération est donc d'une criticité absolue : elle doit garantir une captation exhaustive en périphérie (\textit{Edge Computing}), et un flux de transmission asynchrone hautement résilient, avant d'alimenter nos algorithmes d'apprentissage profond.
+
+Conformément à notre cadre méthodologique Agile Scrum et aux bonnes pratiques d'ingénierie de la donnée (\textit{Data Engineering}), nous formalisons ici l'exécution technique des trois premiers Sprints :
+\begin{itemize}
+    \item Le \textbf{Sprint 1} couvre le déploiement et l'optimisation bas-niveau de la sonde \acrshort{nids} \textit{Suricata}, en exploitant les capacités de \textit{Zero-Copy} du noyau Linux pour éliminer la latence d'acquisition.
+    \item Le \textbf{Sprint 2} est dédié à l'intégration du pipeline de streaming Big Data selon le paradigme de l'Architecture Lambda, exploitant \textit{Apache Kafka} en mode KRaft pour l'inférence temps réel, et la \textit{Stack ELK} pour l'investigation (\textit{Forensic}).
+    \item Le \textbf{Sprint 3} détaille l'ingénierie mathématique et logicielle de notre modèle stochastique \textit{LSTM-VAE} sous \textit{Keras 3}. Ce sprint présente également l'intégralité de la démarche expérimentale menée pour valider ce choix : ingénierie des caractéristiques comparée (sélection globale vs. sélection équilibrée par type d'attaque), calibration rigoureuse du seuil de décision (comparaison de quatre points de fonctionnement), étude comparative contre deux architectures alternatives (\acrshort{if} et \acrshort{ae} déterministe), tests de généralisation sur données synthétiques, et validation en conditions réelles contre trois classes d'attaques.
+\end{itemize}
+
+\section{Déploiement et Optimisation du Moteur d'Inspection Réseau (Sprint 1)}
+%========================================
+
+L'objectif de ce premier Sprint est d'établir l'observabilité réseau primaire à la périphérie de l'infrastructure (\textit{Edge Node}). Suricata agit comme le capteur sensoriel de notre architecture, traduisant les flux binaires bruts transitant sur le réseau en événements structurés, sémantiques et interrogeables. Pour une architecture \textit{DevSecOps} à haute vélocité, cette phase d'ingénierie nécessite de garantir l'ingestion asynchrone du trafic sans introduire de goulots d'étranglement matériels (latence ou \textit{Packet Drop}).
+
+\subsection{Backlog du Sprint 1}
+La planification opérationnelle de ce cycle repose sur la décomposition de l'Épique d'acquisition en récits systèmes (\textit{System Stories}). Afin de structurer le déroulement de cette première phase d'ingénierie, le tableau \ref{tab:backlog_sprint1} détaille les tâches d'infrastructure nécessaires pour garantir une ingestion du trafic sans friction.
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|c|l|>{\raggedright\arraybackslash}X|}
+
+\caption{Backlog détaillé du Sprint 1}
+\label{tab:backlog_sprint1} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{ID} & \textbf{Sprint} & \textbf{User Story (System Story)} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{ID} & \textbf{Sprint} & \textbf{User Story (System Story)} \\ \hline
+\endhead
+
+\textbf{1.1} & \multirow{3}{*}{\shortstack[l]{Sprint 1 :\\Déploiement NIDS}} & En tant que Système, je dois capturer le trafic réseau via l'interface en mode \textit{promiscuous} sans altérer la latence de production. \\ \cline{1-1} \cline{3-3}
+\textbf{1.2} & & En tant qu'Architecte, je veux configurer Suricata pour activer le multithreading noyau (\texttt{AF\_PACKET}) et éviter le \textit{packet drop}. \\ \cline{1-1} \cline{3-3}
+\textbf{1.3} & & En tant que Système, je dois sérialiser les flux décodés au format unifié \textit{EVE JSON} pour faciliter l'ingestion asynchrone. \\ \hline
+
+\end{xltabular}
+
+\subsection{Analyse Fonctionnelle}
+Le cas d'utilisation principal est la \textit{Capture et Inspection Sémantique des Flux}, où le système autonome intercepte le trafic entrant et sortant pour y déceler les premières anomalies connues par l'évaluation des signatures heuristiques. Pour formaliser cette cinématique fonctionnelle, la description textuelle du cas d'utilisation nominal est spécifiée en détail par le tableau \ref{tab:usecase_suricata}.
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|l|>{\raggedright\arraybackslash}X|}
+
+\caption{Description textuelle du cas d'utilisation d'acquisition Edge}
+\label{tab:usecase_suricata} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Cas d'utilisation} & \textbf{Capture et Inspection Sémantique des Flux} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Cas d'utilisation} & \textbf{Capture et Inspection Sémantique des Flux} \\ \hline
+\endhead
+
+\textbf{Acteur} & Suricata (Système Autonome déployé sur la VM Edge) \\ \hline
+\textbf{Résumé} & Le moteur intercepte le trafic sur l'interface d'écoute, décode la couche applicative (HTTP, DNS, TLS), la compare aux règles locales et génère un journal unifié. \\ \hline
+\textbf{Pré-conditions} & L'interface réseau virtuelle est basculée en mode \textit{promiscuous}. Les règles de détection personnalisées sont strictement isolées. \\ \hline
+\textbf{Scénario nominal} &
+1. Le paquet Ethernet arrive sur l'interface d'écoute. \newline
+2. Suricata acquiert le paquet en exploitant un tampon circulaire (\textit{Ring Buffer}) \textit{Zero-Copy}. \newline
+3. Le décodeur interne identifie le protocole applicatif. \newline
+4. Le moteur de règles évalue le flux via un arbre de décision optimisé pour générer d'éventuelles alertes. \newline
+5. Le module de sortie (\textit{Output}) sérialise l'événement complet au sein du fichier \texttt{eve.json}. \\ \hline
+\textbf{Post-conditions} & Un log JSON structuré est persisté sur le disque local, prêt à être ingéré en continu par les pipelines de streaming. \\ \hline
+
+\end{xltabular}
+
+
+\subsection{Conception Architecturale et Modèle de Capture}
+La conception de la couche d'acquisition nécessite une compréhension pointue de l'orchestration des tâches asynchrones au niveau du système d'exploitation. La méthode de capture des paquets dicte la performance limite du \acrshort{nids}. Trois implémentations ont été évaluées :
+\begin{enumerate}
+    \item \textit{PCAP (Packet Capture) :} Interface historique mais obsolète pour les hauts débits. Chaque paquet engendre un basculement de contexte (\textit{Context Switch}) entre l'espace noyau (\textit{Kernel Space}) et l'espace utilisateur (\textit{User Space}), entraînant une saturation CPU.
+    \item \textit{DPDK (Data Plane Development Kit) :} Bypass total du noyau Linux. Bien qu'offrant des performances maximales, elle requiert des cartes réseau (NIC) physiques spécifiques et n'est pas viable dans notre infrastructure virtualisée VMware.
+    \item \textbf{AF\_PACKET (Solution Retenue) :} API native du noyau Linux (version 3.X+) permettant d'accéder aux paquets avec une approche \textbf{Zero-Copy}, réduisant drastiquement les interruptions processeur (\textit{Context Switches}). Le noyau écrit directement les paquets dans un tampon circulaire mémoire (\textit{Memory-mapped Ring Buffer}), lu simultanément par l'application en espace utilisateur.
+\end{enumerate}
+
+Afin de justifier notre choix pour le multithreading, le séquençage bas-niveau et l'orchestration interne des threads d'exécution au sein de la sonde réseau sont illustrés par le diagramme de la figure \ref{fig:sequence_suricata}.
+
+\begin{figure}[H]
+\centering
+    \includegraphics[width=0.8\textwidth]{../diagrams/Seq_Sprint1.png}
+    \caption{Diagramme de séquence « Capture et Inspection Sémantique des Flux »}
+    \label{fig:sequence_suricata}
+\end{figure}
+
+\subsection{Réalisation, Configuration et Mode d'Exécution}
+La réalisation technique s'est traduite par l'installation du démon Suricata et l'édition experte du fichier de configuration \texttt{suricata.yaml}. La méthode de capture a été configurée sur \textbf{AF\_PACKET}.
+
+Pour maximiser les performances, le mode d'exécution des \textit{Threads} a été paramétré sur \textbf{Workers} (plutôt que \textit{AutoFP}). Dans ce modèle, le même thread (CPU core) est responsable de l'acquisition, du décodage et de la détection d'un même paquet, supprimant les verrous de synchronisation (\textit{Locks}) entre les cœurs.
+
+De plus, le mode d'équilibrage de charge \textit{cluster\_flow} a été activé pour répartir l'inspection du trafic équitablement sur tous les cœurs CPU disponibles. Ce mode utilise un hachage symétrique garantissant que tous les paquets appartenant à une même session TCP (même quintuplet : IP source/dest, Port source/dest, Protocole) soient traités par le même thread, condition \textit{sine qua non} pour permettre le réassemblage d'état TCP (TCP Stream Reassembly) et détecter les charges utiles fragmentées.
+
+En matière de bonne gouvernance système, nous avons établi une contrainte stricte sur la VM Edge : l'exécution de tâches lourdes d'Entrée/Sortie (I/O) ou de mises à jour système est proscrite durant les phases de capture pour prévenir toute famine CPU (\textit{CPU starvation}) induisant des pertes de paquets (\textit{Packet Drops}).
+
+\begin{figure}[H]
+\centering
+% [PLACEHOLDER FIGURE : suricata_yaml_config.png]
+\caption{Extrait de configuration \texttt{suricata.yaml}}
+\label{fig:suricata_yaml_config}
+\end{figure}
+
+\subsection{Validation de la Télémétrie Sérialisée}
+L'intégrité de la sérialisation des métadonnées applicatives, ainsi que la levée immédiate des alertes déterministes, sont validées par l'inspection du journal de sortie. L'objectif principal de l'activation d'\textit{EVE JSON} est de générer un format de données pivot, auto-descriptif et nativement ingérable par Apache Kafka, contournant les limitations syntaxiques des anciens fichiers de log plat (\texttt{fast.log}).
+
+L'extrait de log présenté par la figure \ref{fig:validation_eve_json} confirme la conformité du format JSON requis par les composants aval de notre architecture.
+
+\begin{figure}[H]
+\centering
+% [PLACEHOLDER FIGURE : eve_json_validation.png]
+\caption{Validation de la génération des logs de détection}
+\label{fig:validation_eve_json}
+\end{figure}
+
+Un point de vigilance identifié lors de cette phase de validation, et qui s'est révélé décisif ultérieurement (cf. \S\ref{subsec:diagnostic_suricata}), concerne la structure exacte du sous-objet \texttt{tcp} de l'événement \texttt{flow} : celui-ci expose des champs hexadécimaux cumulés (\texttt{tcp\_flags}, \texttt{tcp\_flags\_ts}, \texttt{tcp\_flags\_tc}) plutôt que des indicateurs booléens nommés, une particularité de version qui a dû être prise en compte lors de l'extraction des caractéristiques pour le modèle de détection comportementale (Sprint 3).
+
+\subsection{Conclusion du Sprint 1}
+Ce premier Sprint a permis d'établir une couche d'acquisition réseau fiable, performante et exhaustive à la périphérie de l'infrastructure. Le choix de Suricata en mode \texttt{AF\_PACKET}/\texttt{Workers}, validé par l'inspection de la télémétrie \textit{EVE JSON}, garantit une captation du trafic sans perte de paquets et un format de sortie directement exploitable par les composants aval. Les particularités du format \texttt{EVE JSON} identifiées ici (structure du sous-objet \texttt{tcp}, disponibilité des règles locales) constituent des prérequis techniques directement réinvestis dans l'ingénierie des caractéristiques du Sprint 3.
+
+\section{Intégration du Pipeline de Streaming Double Chemin (Sprint 2)}
+%========================================
+
+La télémétrie brute sérialisée au format JSON sur la VM Edge (Sprint 1) est structurellement inutilisable en l'état pour notre nœud d'apprentissage automatique distant. Une transmission synchrone (ex: requêtes API directes) rendrait l'infrastructure monolithique et fragile : une coupure réseau ou une surcharge du modèle IA bloquerait la sonde réseau.
+
+Ce Sprint 2 a pour objectif de construire un pipeline Big Data \textbf{à double chemin} hautement résilient : un chemin temps réel (\textit{Fast Data}) via \textit{Apache Kafka} pour alimenter le modèle ML en continu, et un chemin de stockage différé (\textit{Cold Data}) via la \textit{Stack ELK} (Elasticsearch, Logstash, Kibana) pour l'audit légal (Forensic) et la supervision par le SOC.
+
+\subsection{Justification Stratégique et Choix Architecturaux}
+L'acheminement de la donnée sans goulot d'étranglement a nécessité des choix d'ingénierie stricts, basés sur la comparaison des standards de l'industrie :
+\begin{itemize}
+    \item \textbf{Courtage de messages : Apache Kafka vs RabbitMQ.} RabbitMQ (orienté file d'attente / \textit{Queue-based}) supprime les messages une fois consommés et sature rapidement en mémoire vive lors d'un pic de charge (DDoS). \textbf{Apache Kafka} (orienté journal / \textit{Log-based}) a été retenu car il persiste les événements sur disque, offrant un tampon d'absorption massif (\textit{Shock Absorber}) et permettant à de multiples consommateurs (SOAR, ML) de relire les flux de manière asynchrone \cite{kreps2011kafka}.
+    \item \textbf{Consensus Kafka : KRaft vs Zookeeper.} Historiquement, Kafka dépendait de Zookeeper pour l'élection des contrôleurs, ce qui doublait l'empreinte mémoire (\textit{JVM footprint}). Nous avons déployé Kafka dans son architecture moderne \textbf{KRaft} (Kafka Raft), implémentant directement le protocole de consensus mathématique \textit{Raft} \cite{ongaro2014search}, réduisant drastiquement la consommation RAM, un critère vital pour notre infrastructure virtualisée.
+    \item \textbf{Extraction et Transport : Filebeat vs Agent Lourd.} Déployer un ETL complexe directement sur la passerelle réseau (\textit{Edge}) aurait provoqué une famine CPU (\textit{CPU Starvation}) préjudiciable à Suricata. La solution retenue déporte la charge : un agent ultra-léger (\textbf{Filebeat}) expédie les logs bruts, et le traitement coûteux (Parsing, Typage) est réalisé de manière asynchrone par \textbf{Logstash} sur le nœud d'analyse distant.
+\end{itemize}
+
+\subsection{Backlog du Sprint 2}
+Pour planifier l'acheminement de la donnée et l'enrichissement sémantique, les récits techniques nécessaires à ce pipeline de streaming sont détaillés par le tableau \ref{tab:backlog_sprint2}.
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|c|l|>{\raggedright\arraybackslash}X|}
+
+\caption{Backlog détaillé du Sprint 2}
+\label{tab:backlog_sprint2} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{ID} & \textbf{Sprint} & \textbf{User Story (System Story)} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{ID} & \textbf{Sprint} & \textbf{User Story (System Story)} \\ \hline
+\endhead
+
+\textbf{2.1} & \multirow{4}{*}{\shortstack[l]{Sprint 2 :\\Pipeline Double Chemin}} & En tant que Système, je dois expédier les logs vers Kafka (temps réel) ET vers Logstash (Filebeat) via une architecture découplée. \\ \cline{1-1} \cline{3-3}
+\textbf{2.2} & & En tant qu'Architecte Data, je dois parser, typer et enrichir (GeoIP) les données dans Logstash pour contextualiser la menace. \\ \cline{1-1} \cline{3-3}
+\textbf{2.3} & & En tant qu'Architecte, je veux indexer ces données dans Elasticsearch en limitant le \textit{heap JVM} pour prévenir les erreurs \textit{Out Of Memory}. \\ \cline{1-1} \cline{3-3}
+\textbf{2.4} & & En tant qu'Analyste SOC, je veux un tableau de bord global (\textit{Kibana}) pour auditer visuellement la volumétrie et les alertes. \\ \hline
+
+\end{xltabular}
+
+
+\subsection{Analyse Fonctionnelle : Routage et Enrichissement}
+Le cas d'utilisation central de ce Sprint est le \textit{Routage Résilient et l'Enrichissement de la Donnée}. Ce processus asynchrone doit garantir qu'un événement généré à l'instant $T$ soit streamé instantanément vers Kafka pour le modèle prédictif, tout en étant enrichi et indexé pour la supervision humaine. La description de ce courtage de messages est spécifiée par le tableau \ref{tab:usecase_etl}.
+
+\begin{center}
+\renewcommand{\arraystretch}{1.5}
+\begin{longtable}{|p{0.22\textwidth}|p{0.73\textwidth}|}
+\caption{Description textuelle du cas d'utilisation de Streaming et d'ETL}
+\label{tab:usecase_etl} \\
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Cas d'utilisation} & \textbf{Routage Résilient et Enrichissement} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Cas d'utilisation} & \textbf{Routage Résilient et Enrichissement} \\ \hline
+\endhead
+
+\textbf{Acteurs} & Collecteur Python, Agent Filebeat, Broker Kafka, Pipeline ELK \\ \hline
+\textbf{Résumé} & Acheminement des logs bruts en temps réel via Kafka d'une part, et extraction, enrichissement sémantique et écriture en base de données distribuée de l'autre. \\ \hline
+\textbf{Pré-conditions} & Les réseaux virtuels sont routés (communication inter-VM), et le broker Kafka est initialisé en mode KRaft. \\ \hline
+\textbf{Scénario nominal} &
+1. L'agent Python \texttt{edge\_collector.py} ET le démon \textit{Filebeat} détectent une nouvelle ligne JSON via un mécanisme de suivi d'inode (\textit{Tailing}). \newline
+2. \textbf{Chemin IA (Temps Réel) :} Le collecteur Python expédie l'événement vers le \textit{Topic} Kafka \texttt{network-features}. \newline
+3. \textbf{Chemin Forensic (Audit) :} \textit{Filebeat} expédie l'événement vers le port d'écoute de \textit{Logstash}. \newline
+4. \textit{Logstash} parse le JSON, applique des mutations (typage explicite) et enrichit l'IP via une base GeoIP. \newline
+5. \textit{Elasticsearch} indexe l'événement structuré dans ses \textit{shards}. \\ \hline
+\textbf{Post-conditions} & La donnée est disponible avec une latence quasi-nulle pour l'IA, et centralisée et requêtable dans Elasticsearch pour la supervision SOC. \\ \hline
+\end{longtable}
+\end{center}
+
+\subsection{Conception Architecturale du Pipeline}
+La conception s'appuie sur le paradigme de l'architecture \textit{Lambda}, garantissant un découplage strict entre la périphérie d'acquisition (\textit{Edge}) et les clusters analytiques distants. Ce découplage protège le système en cas de partition réseau : si la connexion avec le nœud ML est rompue, Kafka met en cache les événements, et Filebeat gère une file d'attente à rétroaction (\textit{Backpressure}). Les données sont transmises automatiquement dès le rétablissement de la connectivité sans aucune perte de paquets.
+
+\begin{figure}[H]
+\centering
+    \includegraphics[width=0.8\textwidth]{../diagrams/diag_seqSprint2.png}
+    \caption{Diagramme de séquence et d'architecture « Routage Résilient et Enrichissement »}
+    \label{fig:sequence_elk_kafka}
+\end{figure}
+
+\subsection{Réalisation Technique et Optimisations MLOps}
+Sur la VM Edge, le script \texttt{edge\_collector.py} (agissant en tant que \textit{Kafka Producer}) lit le descripteur du fichier \texttt{eve.json} en continu et expédie, pour chaque événement de type \texttt{flow}, un vecteur de caractéristiques normalisé vers le \textit{Topic} \texttt{network-features}.
+
+Un enseignement opérationnel important, établi ultérieurement lors de la campagne de diagnostic du Sprint 3 (\S\ref{subsec:diagnostic_suricata}), mérite d'être signalé ici~: le paramètre de regroupement des envois (\texttt{linger\_ms}) du producteur Kafka a été délibérément maintenu à sa valeur minimale (\texttt{linger\_ms=0}, envoi immédiat par message) plutôt que configuré en \textit{micro-batching}. Un essai de regroupement des messages a en effet été testé comme piste de réduction du bruit de détection généré par le trafic interne du pipeline lui-même ; il s'est révélé inefficace (les caractéristiques de type indicateur de drapeau TCP sont invariantes à la fréquence d'envoi) et contre-productif (l'augmentation de la taille de charge utile par envoi a dégradé d'autres caractéristiques). Cette configuration a donc été conservée à l'identique.
+
+En parallèle, l'ETL (\textit{Extract, Transform, Load}) s'opère sur \textbf{Logstash}. Dans le bloc de configuration \textit{filter}, deux opérations critiques ont été codées :
+\begin{enumerate}
+    \item \textbf{Type Coercion (Mutations) :} En JSON, les entiers peuvent être mal interprétés comme des chaînes de caractères (Strings). Une mutation force le typage strict des variables volumétriques (\texttt{bytes\_in}, \texttt{pkts\_out}), condition absolue pour que l'IA et Elasticsearch puissent exécuter des opérations mathématiques (MSE, Agrégations).
+    \item \textbf{Enrichissement CTI (GeoIP) :} Le filtre interroge une base de données de Cyber Threat Intelligence pour associer des coordonnées spatiales (Latitude/Longitude, ASN) aux adresses IP publiques attaquantes, fournissant un contexte géopolitique à l'analyste SOC.
+\end{enumerate}
+
+Enfin, le moteur d'indexation \textbf{Elasticsearch} a fait l'objet d'un \textit{Tuning} système. La taille de sa machine virtuelle Java (JVM) a été hardcodée (\texttt{-Xms1g -Xmx1g}) pour limiter la consommation de RAM. Sans cette limite, Elasticsearch tenterait d'absorber toute la mémoire disponible, risquant d'invoquer le processus \textit{OOM Killer} de Linux, ce qui ferait crasher l'entraînement de notre modèle IA sur la même machine.
+
+\subsection{Validation de la Télémétrie et du Découplage}
+
+La robustesse théorique du pipeline décrite en conception ne vaut que si elle se vérifie en pratique. Cette section apporte trois preuves complémentaires de bon fonctionnement : la tolérance aux pannes du courtage Kafka, l'exactitude de l'enrichissement sémantique opéré par Logstash, et la capacité du tableau de bord à absorber le volume réel du trafic ingéré.
+
+\subsubsection{Preuve de Tolérance aux Pannes (Kafka)}
+Afin de valider l'intégrité de notre pipeline, nous avons vérifié le cœur de l'architecture asynchrone. La figure \ref{fig:kafka_consumer_test} démontre la réussite du courtage de messages. Un script consommateur (\textit{Consumer}), instancié sur le nœud d'Intelligence Artificielle, s'abonne avec succès au \textit{Topic} \texttt{network-features} et dépile en temps réel la structure JSON émise par la passerelle Edge, prouvant le fonctionnement du mode KRaft sans Zookeeper.
+
+
+\begin{figure}[H]
+\centering
+% [PLACEHOLDER FIGURE : consumerSUCCESS-verif2.png]
+\caption{Validation de la communication asynchrone inter-nœuds via Apache Kafka}
+\label{fig:kafka_consumer_test}
+\end{figure}
+
+\subsubsection{Preuve d'Enrichissement Sémantique (Logstash GeoIP)}
+L'opération d'ETL a été validée en injectant une adresse IP publique de test (localisée en Russie) dans le flux d'attaque. L'inspection de l'index dans Kibana (Figure \ref{fig:geoip_validation}) certifie que Logstash a correctement intercepté le flux, interrogé sa base de données, et ajouté la structure spatiale avant l'insertion dans Elasticsearch.
+
+\begin{figure}[H]
+\centering
+% [PLACEHOLDER FIGURE : elastic-verif-geoipTest.png]
+\caption{Validation de l'enrichissement GeoIP par Logstash}
+\label{fig:geoip_validation}
+\end{figure}
+
+\subsubsection{Preuve de Scalabilité du Dashboard (Kibana)}
+Pour répondre aux exigences de supervision opérationnelle d'un SOC, les métriques sérialisées ont été agrégées dans un tableau de bord global de \textit{Data Visualization}. La figure \ref{fig:dashboard_SOC} démontre la capacité de l'architecture de streaming à supporter le volume massif du \textit{Big Data} : près de 1,4 million d'événements ont été ingérés, catégorisés par criticité, et rendus interrogeables en quelques millisecondes.
+
+\begin{figure}[H]
+\centering
+% [PLACEHOLDER FIGURE : dashboard-elastic.png]
+\caption{Tableau de bord SOC global}
+\label{fig:dashboard_SOC}
+\end{figure}
+
+\subsection{Conclusion du Sprint 2}
+Ce Sprint a doté l'architecture d'un pipeline de streaming à double chemin, découplant strictement l'alimentation temps réel du modèle prédictif (Kafka) de la supervision forensique différée (ELK). La validation de la tolérance aux pannes, de l'enrichissement sémantique et de la scalabilité du tableau de bord confirme la robustesse de ce plan de données. Le canal Kafka ainsi constitué (\texttt{Topic network-features}) constitue le point d'entrée exclusif du moteur d'inférence comportemental développé au Sprint 3.
+
+
+%========================================
+\section{Implémentation du Modèle d'Apprentissage Profond LSTM-VAE (Sprint 3)}
+%========================================
+
+La détection des menaces furtives, telles que les fuites de données lentes (\textit{Slow Read/Write}) ou les mouvements latéraux sophistiqués, dépasse par nature les capacités des systèmes de détection d'intrusion (\acrshort{ids}) déterministes basés sur des signatures. Tout en s'inscrivant dans la continuité de notre gouvernance de projet \textbf{Agile Scrum} (Sprint 3), l'ingénierie de ce modèle d'apprentissage profond requiert l'application d'une méthodologie stricte issue du \textbf{MLOps} (\textit{Machine Learning Operations}). Ce cadre d'ingénierie logicielle garantit la reproductibilité de l'ingénierie des caractéristiques (\textit{Feature Engineering}), l'entraînement stochastique, la calibration empirique du seuil de décision, l'étude comparative de plusieurs familles de modèles, et le déploiement résilient de l'inférence en temps réel face aux cyberattaques visant l'infrastructure d'analyse elle-même.
+
+\subsection{Backlog du Sprint 3}
+Le tableau \ref{tab:backlog_sprint3} détaille les récits systèmes couvrant, au-delà de l'implémentation initiale, l'intégralité de la démarche de validation scientifique du modèle retenue pour ce Sprint.
+
+\begingroup
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|c|l|>{\raggedright\arraybackslash}X|}
+
+\caption{Backlog détaillé du Sprint 3}
+\label{tab:backlog_sprint3} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{ID} & \textbf{Sprint} & \textbf{User Story (System Story)} \\ \hline
+\endfirsthead
+
+% En-tête pour les pages suivantes (si le tableau est coupé)
+\multicolumn{3}{c}{\tablename\ \thetable{} -- suite de la page précédente} \\
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{ID} & \textbf{Sprint} & \textbf{User Story (System Story)} \\ \hline
+\endhead
+
+% Pied de page pour les pages intermédiaires
+\hline
+\multicolumn{3}{r}{\small\textit{Suite à la page suivante...}} \\
+\endfoot
+
+% Pied de page final (à la toute fin du tableau)
+\endlastfoot
+
+\textbf{3.1} & \multirow{7}{*}{\shortstack[l]{Sprint 3 :\\Modèle LSTM-VAE}} & En tant que Data Scientist, je dois sélectionner un sous-ensemble de caractéristiques garantissant une couverture équilibrée entre types d'attaque, pas uniquement les plus fréquents. \\ \cline{1-1} \cline{3-3}
+\textbf{3.2} & & En tant qu'Architecte IA, je dois concevoir et entraîner un modèle \acrshort{vae} récurrent capable de modéliser la normalité du trafic sans supervision. \\ \cline{1-1} \cline{3-3}
+\textbf{3.3} & & En tant qu'Ingénieur MLOps, je dois calibrer rigoureusement le seuil de décision par une méthodologie indépendante du jeu de test final. \\ \cline{1-1} \cline{3-3}
+\textbf{3.4} & & En tant que Chercheur, je dois comparer objectivement le modèle retenu à des architectures alternatives (non supervisée classique, autoencodeur déterministe). \\ \cline{1-1} \cline{3-3}
+\textbf{3.5} & & En tant que Data Scientist, je dois valider la capacité de généralisation du modèle sur des données synthétiques indépendantes du jeu d'entraînement. \\ \cline{1-1} \cline{3-3}
+\textbf{3.6} & & En tant qu'Ingénieur Sécurité, je dois valider la détection en conditions réelles face à des attaques effectivement exécutées (scan, brute-force). \\ \cline{1-1} \cline{3-3}
+\textbf{3.7} & & En tant qu'Architecte Sécurité, je dois diagnostiquer et corriger les faux positifs générés par le trafic légitime de l'infrastructure elle-même. \\ \hline
+
+\end{xltabular}
+\endgroup
+
+
+\subsection{Analyse : Justification Stratégique et Choix Algorithmique}
+\label{subsec:choix_algorithmique}
+Dans le cadre de la cybersécurité réseau, la sélection de l'algorithme d'apprentissage non supervisé est la pierre angulaire de l'architecture. Trois familles d'approches ont été implémentées, comparées et évaluées de façon empirique (méthodologie et résultats chiffrés détaillés en \S\ref{subsec:etude_comparative}) :
+\begin{itemize}
+    \item \textbf{Isolation Forest (\acrshort{if}) :} Cet algorithme évalue la non-conformité spatiale d'une observation en isolant les points nécessitant peu de partitionnements aléatoires de l'espace des caractéristiques \cite{liu2008isolation}. Il ignore par construction toute notion de séquentialité temporelle entre observations successives.
+    \item \textbf{LSTM-Autoencodeur déterministe (\acrshort{ae}) :} Architecture identique au modèle retenu (mêmes couches récurrentes, mêmes caractéristiques), mais sans composante variationnelle -- goulot d'étranglement Dense classique et perte de reconstruction pure, sans divergence de Kullback-Leibler.
+    \item \textbf{Deep LSTM-VAE (Solution Retenue) :} Le trafic réseau est intrinsèquement une série temporelle. Les couches \textbf{LSTM} (\textit{Long Short-Term Memory}) capturent la dynamique séquentielle du comportement réseau à travers leur système de portes logiques (Forget, Input, Output gates) \cite{hochreiter1997long}. L'auto-encodeur variationnel (\textbf{VAE}) modélise la distribution probabiliste continue du trafic sain \cite{kingma2013auto}, la régularisation bayésienne de son espace latent contraignant le modèle à apprendre une frontière de normalité plus généraliste qu'un simple autoencodeur.
+\end{itemize}
+
+Cette justification qualitative initiale a fait l'objet d'une validation empirique complète et chiffrée, présentée en \S\ref{subsec:etude_comparative}, qui confirme l'apport spécifique de chacun de ces choix architecturaux.
+
+\subsection{Conception : Ingénierie des Données (Data Preprocessing \& Feature Engineering)}
+\label{subsec:feature_engineering}
+Afin de transformer les trames réseau brutes du dataset de référence \textit{CIC-IDS-2017} \cite{sharafaldin2018toward} en tenseurs exploitables par le réseau de neurones, une phase critique de \textit{Feature Engineering} a été orchestrée via la bibliothèque \texttt{pandas} et le module \texttt{scikit-learn} \cite{pedregosa2011scikit}.
+
+\subsubsection{Prétraitement et Nettoyage}
+Chaque fichier source (huit journées de capture) est traité par blocs (\textit{chunks} de 100\,000 lignes) pour maîtriser l'empreinte mémoire. Les valeurs infinies et manquantes, fréquentes sur les métriques de débit (division par une durée de flux nulle), sont systématiquement éliminées (\texttt{replace([np.inf, -np.inf], np.nan).dropna()}). Le jeu d'entraînement est constitué \textbf{exclusivement} de trafic bénin (80\,\% des flux légitimes, tirage aléatoire à graine fixe pour garantir la reproductibilité), condition nécessaire à l'apprentissage non supervisé de la normalité.
+
+\subsubsection{Sélection des Caractéristiques : de la Sélection Globale à la Sélection Équilibrée}
+L'espace vectoriel initial du dataset comprenait plus de 78 caractéristiques. Une première stratégie de sélection statistique par \texttt{SelectKBest} (score \acrshort{anova} $F$) a été appliquée sur l'ensemble du trafic malveillant regroupé en une seule classe binaire (« attaque » vs. « bénin »), retenant 16 caractéristiques (temporelles et volumétriques : écarts-types d'inter-arrivée, temps d'inactivité, statistiques de taille de paquet).
+
+Cette première sélection s'est révélée \textbf{structurellement biaisée} : le score \acrshort{anova} agrégé est dominé par les types d'attaque les plus nombreux dans l'échantillon (DDoS, DoS Hulk, représentant plusieurs centaines de milliers de flux), noyant le signal discriminant des types d'attaque statistiquement minoritaires mais opérationnellement critiques (attaques par force brute FTP/SSH, comportement de Bot). La validation empirique de ce modèle (\S\ref{subsec:etude_comparative}) a confirmé un rappel proche de 0\,\% sur ces catégories.
+
+Une seconde méthodologie de sélection, dite \textbf{équilibrée}, a donc été développée : le score \acrshort{anova} est calculé \textbf{séparément pour chaque type d'attaque contre le trafic bénin}, et la sélection finale combine, pour les catégories identifiées comme faibles, leurs caractéristiques les plus discriminantes propres, complétées jusqu'à 16 par les caractéristiques les plus fortes au sens du score global. Le tableau \ref{tab:comparaison_selection_features} synthétise les deux approches.
+
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+\small
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}p{4.2cm}|>{\centering\arraybackslash}X|>{\centering\arraybackslash}X|}
+
+\caption{Comparaison des deux méthodologies de sélection de caractéristiques}
+\label{tab:comparaison_selection_features} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{Sélection globale} & \textbf{Sélection équilibrée} \\ \hline
+\endfirsthead
+
+% En-tête pour les pages suivantes
+\multicolumn{3}{c}{\tablename\ \thetable{} -- suite de la page précédente} \\
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Critère} & \textbf{Sélection globale} & \textbf{Sélection équilibrée} \\ \hline
+\endhead
+
+% Pied de page pour les pages intermédiaires
+\hline
+\multicolumn{3}{r}{\small\textit{Suite à la page suivante...}} \\
+\endfoot
+
+% Pied de page final
+\endlastfoot
+
+Nature des variables retenues & Timings/tailles agrégés (IAT, Idle) & Drapeaux TCP (SYN/PSH/ACK/URG) + tailles \\ \hline
+Recall -- FTP-Patator & $\approx$ 0\,\% & 98,01\,\% \\ \hline
+Recall -- SSH-Patator & $\approx$ 0\,\% & 6,23\,\% \\ \hline
+Recall -- Bot & $\approx$ 1\,\% & 12,15\,\% \\ \hline
+Recall -- DDoS / DoS Hulk & 70\,--\,84\,\% & 70\,--\,84\,\% (stable) \\ \hline
+Recall -- PortScan & $\approx$ 0\,\% & $\approx$ 0\,\% (inchangé, cf. \S\ref{subsec:limites_generalisation}) \\ \hline
+
+\end{xltabular}
+\endgroup
+
+
+\begin{figure}[H]
+\centering
+% [PLACEHOLDER FIGURE : matrice_fscore_par_type.png]
+\caption{Matrice des scores ANOVA par type d'attaque ayant motivé la sélection équilibrée}
+\label{fig:matrice_fscore}
+\end{figure}
+
+\subsubsection{Mise à l'Échelle et Normalisation (Scaling)}
+Pour éviter la saturation des gradients (\textit{Vanishing/Exploding Gradients}) et la divergence de la fonction de perte durant la rétropropagation, les caractéristiques du dataset ont nécessité une mise à l'échelle stricte. L'utilisation d'un \texttt{StandardScaler} a été écartée au profit d'un \textbf{\texttt{MinMaxScaler}} (bornage strict sur l'intervalle $[0,1]$), ajusté \textbf{uniquement} sur le sous-ensemble d'entraînement bénin pour prévenir toute fuite d'information (\textit{data leakage}) entre les distributions d'entraînement et de test. Les cellules LSTM utilisant des fonctions d'activation non linéaires telles que la Sigmoïde ($\sigma(x) \in [0,1]$), l'injection de tenseurs strictement normalisés sur les mêmes asymptotes mathématiques accélère considérablement la convergence des poids synaptiques du réseau.
+
+\subsection{Conception : Architecture Mathématique du Deep LSTM-VAE}
+\label{subsec:conception_mathematique}
+
+L'architecture développée au cœur de notre module d'intelligence artificielle fusionne la mémorisation récurrente avec l'inférence variationnelle. L'encodeur LSTM traite la fenêtre temporelle de trafic ($T=10$ pas de temps, séquences construites par IP source) et projette la séquence vers un espace latent $Z$ de dimension $D=16$ -- retenue à l'identique du nombre de caractéristiques d'entrée, un choix pragmatique de départ documenté ici comme tel plutôt que le fruit d'une recherche exhaustive d'hyperparamètre.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.45\textwidth]{../diagrams/ArchitectureLSTM-VAE.png}
+\caption{Architecture et flux d'inférence probabiliste du modèle LSTM-VAE}
+\label{fig:architecture_lstmvae}
+\end{figure}
+
+
+L'apprentissage non supervisé de ce modèle s'appuie sur la maximisation de la borne inférieure de l'évidence, ou \textit{Evidence Lower Bound} (\acrshort{elbo}). Formulée en tant que fonction de perte (Loss) à minimiser, l'équation globale $\mathcal{L}(\theta, \phi; \mathbf{x})$ est définie par :
+\begin{equation}
+\mathcal{L}(\theta, \phi; \mathbf{x}) = \mathbb{E}_{q_\phi(\mathbf{z}|\mathbf{x})}[\log p_\theta(\mathbf{x}|\mathbf{z})] - D_{\text{KL}}(q_\phi(\mathbf{z}|\mathbf{x}) \parallel p(\mathbf{z}))
+\end{equation}
+
+Cette équation fondamentale force le réseau de neurones à accomplir un compromis mathématique strict :
+\begin{enumerate}
+    \item \textbf{La reconstruction (Erreur Quadratique Moyenne -- MSE) :} Le premier terme (l'espérance) évalue la capacité du décodeur $p_\theta$ à reconstituer la séquence originale $\mathbf{x}$ après sa compression. Un comportement anormal engendrera une erreur MSE élevée car le décodeur, entraîné exclusivement sur du trafic bénin, échoue à le reconstruire fidèlement.
+    \item \textbf{La régularisation (Divergence de Kullback-Leibler) :} Le terme $D_{\text{KL}}$ contraint l'encodeur $q_\phi$ à mapper les séquences saines sur une distribution normale centrée réduite $\mathcal{N}(0, I)$ dans l'espace latent.
+\end{enumerate}
+
+L'échantillonnage stochastique dans l'espace latent bloquant par définition le calcul des dérivées pour la rétropropagation du gradient, nous avons implémenté l'\textbf{Astuce de Reparamétrisation} (\textit{Reparameterization Trick}). Cette solution mathématique a été codée via une couche Keras sur mesure (\texttt{CoucheEchantillonnage}) définie par :
+\begin{equation}
+\mathbf{z} = \boldsymbol{\mu} + \exp\left(\frac{1}{2} \boldsymbol{\log\sigma^2}\right) \odot \boldsymbol{\epsilon} \quad \text{avec} \quad \boldsymbol{\epsilon} \sim \mathcal{N}(0,I)
+\end{equation}
+
+\subsection{Réalisation : Entraînement et Choix des Hyperparamètres}
+\label{subsec:fine_tuning}
+L'entraînement a été conduit avec l'optimiseur \textbf{Adam}, un \texttt{batch\_size} de 128, et le rappel Keras \texttt{EarlyStopping} (patience de 10 époques sur la perte de validation), évitant de fixer arbitrairement un nombre d'époques : l'entraînement s'interrompt organiquement lorsque \texttt{val\_loss} cesse de s'améliorer, et seuls les poids synaptiques optimaux sont restaurés et sérialisés. La taille de fenêtre temporelle ($T=10$) résulte d'un compromis pragmatique entre richesse contextuelle et latence d'inférence, plutôt que d'un balayage systématique -- un point explicitement identifié comme axe d'amélioration méthodologique (cf. Limites, \S\ref{subsec:limites_generalisation}).
+
+\begin{figure}[H]
+\centering
+% [PLACEHOLDER FIGURE : trainLSTMVAE.png]
+% Capture du terminal affichant les temps par epoch et les métriques de loss.
+\caption{Logs d'exécution MLOps de l'entraînement}
+\label{fig:logs_execution_ia}
+\end{figure}
+
+\subsection{Réalisation : Calibration Rigoureuse du Seuil de Décision}
+\label{subsec:threshold_scaling}
+La performance d'un détecteur d'anomalies par reconstruction repose presque entièrement sur un seul paramètre scalaire : le seuil de décision au-delà duquel une erreur de reconstruction est jugée anormale. Cette sous-section documente la démarche suivie pour fixer ce seuil de façon rigoureuse plutôt qu'arbitraire -- de la découverte d'un défaut de calibration silencieux jusqu'à la comparaison chiffrée de plusieurs points de fonctionnement candidats.
+
+
+\subsubsection{Diagnostic d'un Défaut de Recalibration}
+Une première anomalie méthodologique a été identifiée en cours de projet : le seuil opérationnel ($\mu + 1\sigma$ de l'erreur de reconstruction sur le jeu de validation bénin) n'était \textbf{pas recalculé à chaque réentraînement} du modèle -- le script d'entraînement initial ne persistait que le seuil à $3\sigma$ dans les métadonnées, tandis que le pipeline d'inférence et d'évaluation consommait silencieusement une valeur de repli codée en dur, potentiellement héritée d'un entraînement antérieur. Ce défaut a été corrigé en modifiant le script d'entraînement pour qu'il recalcule et persiste systématiquement $\mu$, $\sigma$, le seuil à $1\sigma$ et les 16 seuils individuels par caractéristique (percentile 98) à chaque exécution.
+
+\subsubsection{Méthodologie de Calibration Rigoureuse}
+Après correction, une méthodologie de calibration indépendante du jeu de test final a été mise en œuvre : le jeu de test est scindé en un sous-ensemble de \textbf{calibration} (50\,\%, stratifié) utilisé exclusivement pour choisir le seuil, et un sous-ensemble de \textbf{test final} (50\,\%) sur lequel les métriques sont rapportées -- évitant tout biais optimiste de calibration sur les mêmes données que celles utilisées pour le reporting.
+
+Sur le sous-ensemble de calibration, la courbe \acrshort{roc} et la courbe Précision-Rappel ont été tracées, produisant une aire sous la courbe \acrshort{roc} de $\text{AUC-ROC}=0,79$ et une aire sous la courbe Précision-Rappel de $\text{AUC-PR}=0,84$ -- mesures indépendantes du choix d'un seuil particulier \cite{fawcett2006roc}. Plusieurs critères de sélection ont ensuite été comparés : indice de Youden ($\max(\text{TPR}-\text{FPR})$), optimum du score $F_1$, optimum du score $F_2$ (pondérant le rappel), un critère sensible au coût (pondération $10\times$ pour un faux négatif), et des points de fonctionnement à taux de faux positifs fixé (1\,\%, 5\,\%, 10\,\%).
+
+\subsubsection{Comparaison des Points de Fonctionnement Retenus}
+Quatre seuils candidats, tous évalués sur le jeu de test final (jamais vu pendant la calibration) selon la règle de décision hybride complète (vote $\geq 4$ caractéristiques au-delà de leur seuil individuel \textbf{OU} erreur globale au-delà du seuil), ont été comparés par type d'attaque. Le tableau \ref{tab:comparaison_seuils} synthétise ce résultat central.
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|>{\centering\arraybackslash}X|c|c|c|c|c|}
+
+\caption{Comparaison des quatre points de fonctionnement du seuil de décision}
+\label{tab:comparaison_seuils} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Seuil} & \textbf{FPR global} & \textbf{Recall global} & \textbf{FTP-Patator} & \textbf{Infiltration} & \textbf{DDoS} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Seuil} & \textbf{FPR global} & \textbf{Recall global} & \textbf{FTP-Patator} & \textbf{Infiltration} & \textbf{DDoS} \\ \hline
+\endhead
+
+$F_1$-optimal (37,77) & 48,32\,\% & 96,31\,\% & 100,00\,\% & 96,83\,\% & 100,00\,\% \\ \hline
+\textbf{1,5$\sigma$ (68,12) -- retenu} & \textbf{9,23\,\%} & \textbf{51,89\,\%} & \textbf{98,01\,\%} & \textbf{55,56\,\%} & \textbf{83,98\,\%} \\ \hline
+2$\sigma$ (77,95) & 5,81\,\% & 51,89\,\% & 91,59\,\% & 42,86\,\% & 83,98\,\% \\ \hline
+3$\sigma$ (97,62) & 3,12\,\% & 50,90\,\% & 29,24\,\% & 22,22\,\% & 83,98\,\% \\ \hline
+
+\end{xltabular}
+
+Le seuil $1,5\sigma$ ($\tau = 68,12$) a été retenu comme point de fonctionnement opérationnel : il ramène le taux de faux positifs de 48,32\,\% (optimum $F_1$, inexploitable en production) à 9,23\,\%, tout en préservant le rappel sur les catégories les plus dégradées aux seuils supérieurs (FTP-Patator, Infiltration). Cette calibration est documentée et justifiée directement dans les métadonnées du modèle produites en fin d'entraînement, garantissant la traçabilité du choix.
+
+\begin{figure}[H]
+\centering
+% [PLACEHOLDER FIGURE : courbes_roc_pr.png]
+\caption{Courbes ROC et Précision-Rappel sur le jeu de calibration (AUC-ROC=0,79 ; AUC-PR=0,84)}
+\label{fig:courbes_roc_pr}
+\end{figure}
+
+\subsection{Validation : Étude Comparative des Architectures de Détection}
+\label{subsec:etude_comparative}
+Afin de valider objectivement le choix du LSTM-VAE face aux alternatives présentées en \S\ref{subsec:choix_algorithmique}, les trois architectures ont été entraînées et évaluées dans des conditions \textbf{strictement identiques} : mêmes 16 caractéristiques équilibrées, même jeu d'entraînement bénin, même jeu de test, même seuil recalibré pour chaque modèle selon la même méthodologie. L'Isolation Forest a été entraînée en mode non supervisé strict (\texttt{contamination='auto'}), sans aucune fuite de label. Le tableau \ref{tab:comparaison_modeles} synthétise les résultats.
+
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}X|c|c|c|}
+
+\caption{Étude comparative des trois architectures de détection (mêmes données, même méthodologie)}
+\label{tab:comparaison_modeles} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Métrique} & \textbf{LSTM-VAE (retenu)} & \textbf{Isolation Forest} & \textbf{LSTM-AE (sans VAE)} \\ \hline
+\endfirsthead
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Métrique} & \textbf{LSTM-VAE (retenu)} & \textbf{Isolation Forest} & \textbf{LSTM-AE (sans VAE)} \\ \hline
+\endhead
+
+Recall global & 51,89\,\% & 50,95\,\% & 50,19\,\% \\ \hline
+FPR global & \textbf{9,23\,\%} & 57,36\,\% & 1,75\,\% \\ \hline
+Precision & 87,41\,\% & 52,17\,\% & \textbf{97,24\,\%} \\ \hline
+Recall FTP-Patator & \textbf{98,01\,\%} & 0,23\,\% & 0,00\,\% \\ \hline
+Recall SSH-Patator & \textbf{6,23\,\%} & 0,29\,\% & 0,00\,\% \\ \hline
+Recall DDoS & 83,98\,\% & 84,31\,\% & 83,79\,\% \\ \hline
+
+\end{xltabular}
+
+Ce résultat, bien que le rappel global agrégé soit quasi identique entre les trois modèles ($\approx$ 50--52\,\%), révèle une divergence radicale par type d'attaque : \textbf{sans la composante variationnelle}, le LSTM-Autoencodeur perd intégralement la capacité de détection sur les attaques par force brute (0,00\,\% contre 98,01\,\%), tandis qu'\textbf{Isolation Forest}, dénué de toute modélisation temporelle, présente un taux de faux positifs prohibitif (57,36\,\%) en configuration non supervisée honnête. Ce résultat valide empiriquement, avec preuve chiffrée, les deux choix architecturaux justifiés qualitativement en \S\ref{subsec:choix_algorithmique} : la modélisation séquentielle (LSTM) est décisive pour les attaques répétitives, et la régularisation variationnelle (VAE) est décisive pour la sensibilité fine du détecteur.
+
+\begin{figure}[H]
+\centering
+% [PLACEHOLDER FIGURE : comparaison_isolation_forest_output.png]
+\caption{Sortie du script d'évaluation comparative Isolation Forest (mêmes features/train/test que le LSTM-VAE)}
+\label{fig:comparaison_if}
+\end{figure}
+
+\subsection{Validation : Tests sur Données Synthétiques et Limites de Généralisation}
+\label{subsec:limites_generalisation}
+Au-delà de l'évaluation statistique sur données réelles, deux familles de tests complémentaires ont été menées pour éprouver la robustesse du modèle dans des conditions contrôlées : des séquences synthétiques reproduisant fidèlement le profil statistique de chaque type d'attaque, puis des profils entièrement indépendants du jeu de données d'entraînement, afin de distinguer ce que le modèle a réellement appris de ce qu'il a simplement mémorisé.
+
+\subsubsection{Test Synthétique par Profil Statistique Réel}
+Pour chaque type d'attaque, des séquences synthétiques ont été construites à partir de la moyenne et de l'écart-type \textit{réels} du type considéré (deux variantes : \textit{prototype}, variance nulle, et \textit{réaliste}, avec variance mesurée), à vérité terrain garantie. Ce test confirme la hiérarchie de détection observée sur données réelles et révèle un mécanisme intéressant sur les attaques par force brute FTP : le décalage moyen seul (configuration \textit{prototype}, 0\,\%) ne suffit pas à la détection, c'est la \textbf{variance inter-tentatives} (configuration \textit{réaliste}, 36,5\,\%) qui porte le signal discriminant -- une nuance mécaniste que seul un test à variance contrôlée pouvait révéler.
+
+\subsubsection{Test d'Isolation du Cas PortScan}
+Un test synthétique dédié, construit à partir du profil statistique réel de 158\,804 flux \textit{PortScan}, démontre que même le signal le plus pur possible (moyenne exacte, variance nulle, répétée sur les 10 pas de temps de la fenêtre) reste très largement sous le seuil de décision (MSE $=41,74$ pour un seuil $=68,12$). Ce résultat élimine définitivement les hypothèses de sous-calibration du seuil ou de dilution par variance : le signal distinctif d'un scan de ports (diversité des ports de destination contactés par une même source) est structurellement absent de l'espace des 16 caractéristiques de niveau flux, quel que soit le modèle ou le seuil retenu.
+
+\begin{figure}[H]
+\centering
+% [PLACEHOLDER FIGURE : test_portscan_synthetique_output.png]
+\caption{Sortie du test synthétique isolant la cause de l'angle mort PortScan}
+\label{fig:test_portscan_synth}
+\end{figure}
+
+\subsubsection{Test de Généralisation Hors-Distribution}
+Un jeu de données artificiel, construit sans lecture d'aucune statistique CICIDS2017 (profils raisonnés à partir de connaissances réseau générales, exprimés en fractions de la plage normalisée apprise par le \texttt{MinMaxScaler}), a été soumis au modèle final. Après correction de deux artefacts méthodologiques identifiés en cours de test (encodage des drapeaux TCP en valeurs binaires plutôt que continues, variance temporelle artificiellement nulle), un profil de trafic bénin générique reste néanmoins classé comme anormal par le modèle. Ce résultat, honnête et reproductible sur trois tentatives indépendantes, illustre une propriété connue des détecteurs d'anomalies par reconstruction : la frontière de normalité apprise reflète une variété de corrélations conjointes spécifique à la distribution d'entraînement, non une région définie par des bornes indépendantes par variable. Cette limite est documentée comme telle en \S\ref{sec:limites_chapitre} et justifie \textit{a posteriori} le choix architectural d'un déploiement on-premise calibré localement plutôt qu'un modèle générique transférable tel quel.
+
+\subsection{Réalisation : Mécanismes de Cyber-Résilience et Inférence Temps Réel (Edge-to-ML)}
+\label{subsec:cyber_resilience}
+Le démon d'orchestration Kafka (\texttt{realtime\_interface.py}) exécute le modèle en production. Au-delà de l'algorithmique IA, une ingénierie logicielle avancée a été codée pour garantir la survie de l'infrastructure de défense face aux attaques par épuisement de ressources (\textit{State Exhaustion}).
+
+\subsubsection{Tampon Glissant Isolé (Stateful Windowing)}
+Le maintien d'un historique temporel indépendant pour chaque équipement du réseau a été implémenté en exploitant la structure \textit{thread-safe} \texttt{collections.deque}. Le démon alloue dynamiquement une fenêtre glissante de taille $T=10$ par adresse IP source, isolant les contextes et prévenant le mélange des flux lors de l'inférence.
+
+\subsubsection{Pré-filtre Volumétrique Global (Bouclier Anti-DDoS Spoofing)}
+\textbf{Justification de l'implémentation :} Lors d'une attaque DDoS distribuée par usurpation d'adresse IP (\textit{IP Spoofing}), l'attaquant génère une adresse aléatoire par paquet. Puisque le tampon du LSTM-VAE requiert 10 paquets pour évaluer une IP, l'attaque esquive le modèle par sa conception (\textit{By Design}).
+
+\textbf{Ingénierie de la Solution :} Un compteur macroscopique intercepte la métrologie du trafic total (indépendamment des IP) \textit{avant} son ingestion par le LSTM-VAE. Si la vélocité globale excède le seuil physique de $300$ paquets / 2 secondes, l'algorithme court-circuite le réseau de neurones et émet le signal critique \texttt{ENABLE\_DDOS\_SHIELD}.
+
+\subsubsection{Persistance Temporelle et Liste Blanche (Whitelist)}
+Afin de prévenir les tempêtes d'alertes (\textit{Alert Storm}), une décision de blocage n'est déclenchée que si une même IP source cumule au moins \textbf{3 évaluations anormales sur ses 5 dernières séquences} (\texttt{SEUIL\_PERSISTANCE=3}), absorbant les faux positifs isolés avant toute action automatique. Les actifs critiques déclarés (\texttt{actifs\_critiques.json}, gérable depuis le tableau de bord SOC) sont exemptés de l'action de blocage automatique -- l'anomalie reste néanmoins calculée, journalisée et visible par l'administrateur (\texttt{*** SÉCURITÉ WHITELIST ***}), garantissant qu'aucune usurpation d'identité whitelistée ne reste totalement invisible.
+
+\subsection{Validation : Diagnostic et Durcissement Sécuritaire en Conditions Réelles}
+\label{subsec:diagnostic_suricata}
+
+\subsubsection{Validation Face à des Attaques Réellement Exécutées}
+Trois classes d'attaques ont été menées en conditions réelles depuis une machine Kali Linux contre l'infrastructure de laboratoire, avec observation simultanée des journaux Suricata et du moteur d'inférence. Le tableau \ref{tab:validation_attaques_reelles} synthétise ces trois campagnes.
+
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+\small
+\begin{xltabular}{\textwidth}{|>{\raggedright\arraybackslash}p{3.2cm}|>{\raggedright\arraybackslash}p{2.6cm}|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|}
+
+\caption{Validation en conditions réelles : détection croisée Suricata / LSTM-VAE}
+\label{tab:validation_attaques_reelles} \\
+
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Attaque} & \textbf{Suricata} & \textbf{LSTM-VAE} & \textbf{Observation} \\ \hline
+\endfirsthead
+
+% En-tête pour les pages suivantes
+\multicolumn{4}{c}{\tablename\ \thetable{} -- suite de la page précédente} \\
+\hline
+\rowcolor[HTML]{EFEFEF}
+\textbf{Couche} & \textbf{Technologie retenue} & \textbf{Version} & \textbf{Nœud} \\ \hline
+\endhead
+
+% Pied de page pour les pages intermédiaires
+\hline
+\multicolumn{4}{r}{\small\textit{Suite à la page suivante...}} \\
+\endfoot
+
+% Pied de page final
+\endlastfoot
+
+Nikto (scan web) & Détecté & Détecté (5 votes, MSE $\approx 200$) & Détection croisée, blocage en $<3$s \\ \hline
+Nmap -sS (scan ports) & Non détecté puis détecté & Non détecté (MSE $\approx 41$, sous seuil) & Règle locale \texttt{local.rules} non chargée (bug de configuration identifié et corrigé) \\ \hline
+Hydra (brute-force SSH) & Non détecté & Détecté (5 votes, MSE $\approx 182$, blocage en 2 évaluations) & Aucune règle ET comportementale de brute-force SSH applicable en réseau privé \\ \hline
+
+\end{xltabular}
+\endgroup
+
+
+\begin{figure}[H]
+\centering
+% [PLACEHOLDER FIGURE : logs_hydra_detection.png]
+\caption{Logs de détection et d'auto-blocage lors de l'attaque Hydra (brute-force SSH)}
+\label{fig:logs_hydra}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+% [PLACEHOLDER FIGURE : logs_nikto_detection.png]
+\caption{Logs de détection croisée Suricata/LSTM-VAE lors de l'attaque Nikto}
+\label{fig:logs_nikto}
+\end{figure}
+
+Le cas Nmap a révélé un défaut de configuration réel : le fichier \texttt{local.rules}, contenant une règle de détection de scan SYN par seuil (\texttt{threshold:type both, track by\_src, count 10, seconds 5}), n'était pas référencé dans la directive \texttt{rule-files} de \texttt{suricata.yaml}. Une fois la règle correctement chargée et le fichier corrigé (suppression d'une signature dupliquée), l'attaque Nmap a été détectée par les deux couches simultanément lors d'un test de reproduction.
+
+Le cas Hydra constitue la démonstration la plus directe de la complémentarité architecturale du système : l'inspection du jeu de règles actif confirme l'\textbf{absence de toute règle comportementale} de détection du brute-force SSH par comptage de tentatives échouées -- la seule couverture théorique repose sur des listes de réputation d'IP publiques, structurellement inapplicables à un réseau privé de laboratoire. Le LSTM-VAE, lui, détecte et bloque cette attaque sans dépendre d'aucune signature préexistante.
+
+\subsubsection{Diagnostic et Correction des Faux Positifs d'Infrastructure}
+Une investigation systématique a été menée suite à l'observation d'alertes répétées sur les adresses IP internes du pipeline lui-même (\texttt{vm-edge}, \texttt{vm-ml}). Par élimination successive (arrêt contrôlé du service de télémétrie \texttt{agent\_monitor.py}, inspection \texttt{tcpdump} du trafic réel), la cause racine a été isolée : le producteur Kafka du collecteur \texttt{edge\_collector.py} lui-même génère un trafic statistiquement proche d'une signature de force brute (connexions établies, drapeaux SYN/ACK/PSH répétés à intervalle régulier) -- exactement le pattern que les caractéristiques équilibrées ont été sélectionnées pour détecter (\S\ref{subsec:feature_engineering}).
+
+Un mécanisme de neutralisation sélective a été implémenté et validé expérimentalement : pour les adresses IP de la liste blanche uniquement, les quatre caractéristiques de drapeaux TCP responsables du déclenchement sont neutralisées \textbf{avant} l'inférence. Ce mécanisme a été validé sans régression : le trafic interne cesse de déclencher des votes (MSE ramené de 97--182 à 12--13) tandis qu'une attaque Hydra réelle reste détectée et bloquée avec la même latence qu'auparavant (moins de 3 secondes).
+
+\begin{figure}[H]
+\centering
+% [PLACEHOLDER FIGURE : diag_features_violation.png]
+\caption{Diagnostic par feature : caractéristiques précises déclenchant le vote sur le trafic interne}
+\label{fig:diag_features}
+\end{figure}
+
+\subsubsection{Durcissement contre l'Usurpation d'Adresse : Protection ARP}
+Ce mécanisme de confiance, comme tout mécanisme fondé sur l'adresse IP source, demeure théoriquement vulnérable à l'usurpation. Une contre-mesure au niveau de la couche liaison a donc été implémentée et \textbf{testée offensivement} : une règle \texttt{arptables} associant strictement chaque adresse IP de confiance à sa véritable adresse MAC a été déployée sur le nœud d'inférence, rendant caduque toute usurpation ARP provenant d'un segment réseau tiers.
+
+Cette protection a été validée par une attaque réelle d'empoisonnement ARP (\texttt{arpspoof}) menée depuis Kali Linux contre le nœud d'inférence, ciblant l'adresse whitelistée de \texttt{vm-edge}. Pendant toute la durée de l'attaque, la table ARP du nœud protégé a conservé l'adresse MAC légitime, et le compteur de paquets rejetés par la règle \texttt{arptables} a progressé en temps réel (de 20 à 22 paquets interceptés durant l'observation), confirmant l'interception active des trames falsifiées avant qu'elles n'atteignent la table de résolution ARP du système.
+
+\begin{figure}[H]
+\centering
+% [PLACEHOLDER FIGURE : arpspoof_test_kali.png]
+\caption{Attaque d'empoisonnement ARP (arpspoof) menée depuis Kali Linux contre le nœud d'inférence}
+\label{fig:arpspoof_kali}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+% [PLACEHOLDER FIGURE : arptables_compteurs.png]
+\caption{Compteurs \texttt{arptables} confirmant l'interception des paquets ARP falsifiés (\texttt{arptables -L -v})}
+\label{fig:arptables_compteurs}
+\end{figure}
+
+\subsection{Validation : Convergence, Latence et Faux Positifs en Conditions Opérationnelles}
+
+L'entraînement du modèle s'est stabilisé grâce à l'\texttt{EarlyStopping}, validant le calibrage du \textit{Learning Rate} de l'optimiseur Adam (Figure \ref{fig:convergence_lstmvae}).
+
+\begin{figure}[H]
+\centering
+% [PLACEHOLDER FIGURE : convergence_lstmvae.png]
+\caption{Courbes de convergence algorithmique du modèle LSTM-VAE avec Early Stopping}
+\label{fig:convergence_lstmvae}
+\end{figure}
+
+Les journaux d'inférence en production (Figure \ref{fig:realtime_logs}) certifient une latence computationnelle unitaire de l'ordre de \textbf{2 à 4 millisecondes} par séquence, cohérente avec la pré-compilation des graphes Tensor via le décorateur Keras \texttt{@tf.function(reduce\_retracing=True)} et le \textit{warm-up} du modèle au démarrage du service.
+
+\begin{figure}[H]
+\centering
+% [PLACEHOLDER FIGURE : realtime_logs.png]
+\caption{Traces de corrélation temps réel (MSE, votes, persistance) validant l'étouffement du bruit résiduel}
+\label{fig:realtime_logs}
+\end{figure}
+
+Après application du mécanisme de neutralisation sélective et de la protection ARP (\S\ref{subsec:diagnostic_suricata}), le système opère avec un taux de faux positifs global de \textbf{9,23\,\%} au niveau séquence (seuil $1,5\sigma$), absorbé en pratique par la persistance temporelle avant toute action de blocage, et un rappel variant structurellement de $<1\,\%$ (PortScan, attaques applicatives web) à $98\,\%$ (force brute FTP) selon le type d'attaque -- une hétérogénéité expliquée mécaniquement en \S\ref{subsec:limites_generalisation} et \S\ref{sec:limites_chapitre}, non un défaut de calibration.
+
+\subsection{Limites Identifiées et Perspectives}
+\label{sec:limites_chapitre}
+La démarche de validation exhaustive menée dans ce Sprint met en évidence des limites structurelles, documentées ici en toute transparence plutôt que dissimulées :
+\begin{itemize}
+    \item \textbf{Angle mort structurel sur le balayage de ports (PortScan) et les attaques applicatives web} : la signature de ces attaques repose respectivement sur la diversité de destinations à travers plusieurs flux (nécessitant une agrégation par IP source non disponible dans le format de capture actuel) et sur le contenu du payload applicatif (hors du périmètre d'une analyse de flux réseau). Ces angles morts sont structurellement comblés par la couche de détection par signatures (Suricata), justifiant \textit{a posteriori} l'architecture hybride du système global.
+    \item \textbf{Limite de généralisation hors distribution} (\S\ref{subsec:limites_generalisation}), documentée comme axe d'amélioration nécessitant une recalibration périodique sur trafic local.
+    \item \textbf{Vulnérabilité résiduelle à l'usurpation IP}, significativement réduite par la protection \texttt{arptables} (validée expérimentalement) mais non éliminée dans l'absolu ; une authentification applicative (SASL/SSL) du canal Kafka constitue la perspective de durcissement complémentaire la plus robuste, documentée mais non implémentée dans le périmètre de ce Sprint.
+    \item \textbf{Hyperparamètres non exhaustivement balayés} (dimension latente, taille de fenêtre temporelle) : les valeurs retenues sont pragmatiques et documentées comme telles plutôt que présentées comme un optimum démontré.
+\end{itemize}
+
+\subsection{Conclusion du Sprint 3}
+Ce Sprint a livré, au-delà de l'implémentation du modèle LSTM-VAE, une démarche de validation scientifique complète et reproductible : une méthodologie de sélection de caractéristiques corrigeant un biais structurel identifié empiriquement, une calibration de seuil indépendante du jeu de test rapporté, une étude comparative chiffrée contre deux architectures alternatives confirmant la pertinence des choix effectués, des tests de généralisation sur données synthétiques et hors-distribution documentant honnêtement les limites du modèle, et une validation en conditions réelles ayant permis de détecter et corriger deux défauts opérationnels (configuration Suricata, faux positifs d'infrastructure) tout en démontrant, preuve à l'appui, la complémentarité effective entre détection par signatures et détection comportementale.
+
+\section{Conclusion}
+%========================================
+
+Ce troisième chapitre a scellé le succès technique et métrologique de notre \textit{Release 1}. En validant conjointement les Sprints 1, 2 et 3, nous avons érigé un système d'acquisition et d'analyse robuste, dont chaque composante a été soumise à une démarche de preuve empirique plutôt qu'à une simple implémentation déclarative.
+
+La sonde Suricata, optimisée via l'API \textit{AF\_PACKET} au niveau du noyau Linux, extrait la sémantique des flux à l'Edge sans perte de paquets. Le pipeline de streaming à double chemin, bâti sur le paradigme de l'Architecture Lambda, garantit la supervision SOC (\textit{Forensic}) via la Stack ELK, et l'alimentation temps réel via Apache Kafka en mode KRaft.
+
+Enfin, le moteur prédictif \textit{LSTM-VAE}, développé sous Keras 3, a fait l'objet de la démarche de validation la plus approfondie du projet : sélection de caractéristiques corrigée par diagnostic empirique, calibration de seuil indépendante en quatre points de fonctionnement comparés, étude comparative contre \textit{Isolation Forest} et un autoencodeur déterministe confirmant chiffres à l'appui la pertinence de l'architecture retenue, tests sur données synthétiques et hors-distribution documentant honnêtement ses limites, et validation en conditions réelles contre trois classes d'attaques ayant permis d'identifier et corriger deux défauts opérationnels concrets. Le système opère avec une latence d'inférence de 2 à 4 millisecondes et un taux de faux positifs maîtrisé de 9,23\,\% au niveau séquence, absorbé par la persistance temporelle avant toute action automatique.
+
+L'ensemble de ce \textbf{Plan de Données (\textit{Data Plane})} étant pleinement opérationnel, résilient et rigoureusement validé, nous disposons de la matière première indispensable pour basculer de l'observation vers la cyberdéfense active. Le chapitre suivant (Chapitre 4) abordera la \textit{Release 2}, dédiée à la composante exécutive du projet : le développement de l'orchestrateur de réponse autonome (\textit{SOAR}) et la mise en œuvre de la gouvernance \textit{Zero Trust}.

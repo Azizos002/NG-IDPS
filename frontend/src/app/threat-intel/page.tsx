@@ -9,6 +9,8 @@ import {
   Shield, Radio, Check, GraduationCap, BookOpen
 } from "lucide-react";
 import Link from 'next/link'; // Import ajouté pour la redirection
+import CtiRunPanel from "@/components/CtiRunPanel";
+
 
 export default function ThreatIntelPage() {
   const [actualities, setActualities] = useState<any[]>([]);
@@ -39,7 +41,7 @@ export default function ThreatIntelPage() {
       const backendUrl = `http://${currentHost}:4000`;
 
       const resActs = await fetch(`${backendUrl}/api/cti-actualities`);
-      if (resActs.ok) setActualities(await resActs.json());
+      if (resActs.ok) setActualities(await resActs.json()); 
 
       const resSources = await fetch(`${backendUrl}/api/cti-sources`);
       if (resSources.ok) setSources(await resSources.json());
@@ -231,9 +233,7 @@ export default function ThreatIntelPage() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={fetchBackend} disabled={isRefreshing} className="flex items-center gap-2 px-3.5 py-2 bg-slate-900 border border-slate-700 hover:border-slate-600 rounded-lg text-xs font-semibold text-slate-300 hover:text-white transition-all shadow-sm disabled:opacity-50">
-            <RefreshCw size={13} className={isRefreshing ? "animate-spin text-blue-400" : ""} /> Actualiser
-          </button>
+          <CtiRunPanel onFinished={fetchBackend} />
         </div>
       </div>
 

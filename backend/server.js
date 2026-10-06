@@ -7,8 +7,11 @@ const nodemailer = require('nodemailer');
 const fs = require('fs');
 const path = require('path');
 const { Kafka } = require('kafkajs');
-const { GoogleGenAI } = require('@google/genai');
 const jwt = require('jsonwebtoken');
+
+
+const { GoogleGenAI } = require('@google/genai');
+const { Mistral } = require('@mistralai/mistralai');
 
 require('dotenv').config();
 
@@ -17,6 +20,14 @@ require('dotenv').config();
 // Initialisation du client Gemini avec la nouvelle librairie unifiée
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
+// Mistral =  fallback cloud
+const mistral = new Mistral({ apiKey: process.env.MISTRAL_API_KEY });
+
+// Ollama / Llama 3.2 = dernier fallback local
+const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
+
+// JWT = jeton de sécurité pour les sessions utilisateur
 const JWT_SECRET = process.env.JWT_SCRT;
 
 
@@ -74,17 +85,57 @@ const CtiActualitySchema = new mongoose.Schema({
   source_osint: String,
   url_article: String,
   resume_ia: String,
-  type_article: { type: String, default: "TECHNICAL_THREAT" }, // "TECHNICAL_THREAT" ou "AWARENESS"
+  type_article: { type: String, default: "TECHNICAL_THREAT" },
   iocs_extraits: Array,
   regles_suricata: String,
   fiabilite_score: Number,
   status: { type: String, default: "PENDING" },
   error_log: { type: String, default: null },
-  formation_data: { type: Object, default: null }, // <-- CHAMP OBLIGATOIRE POUR STOCKER LE COURS GEMINI
+  formation_data: { type: Object, default: null },
+  cible_diffusion_type: { type: String, default: null },
+  cible_diffusion_value: { type: String, default: null },
+  date_diffusion: { type: Date, default: null },
   last_updated: { type: Date, default: Date.now },
   date_publication: { type: Date, default: Date.now }
 });
 const CtiActuality = mongoose.model('CtiActuality', CtiActualitySchema);
+
+// ============================================================
+// SERVICE CTI À LA DEMANDE (agent_cti_runner.py sur VM-Response)
+// ============================================================
+const CtiRunLogSchema = new mongoose.Schema({
+  key: { type: String, default: 'last', unique: true },
+  status: String,
+  startedAt: Date,
+  finishedAt: Date,
+  exitCode: Number,
+  lines: [String],
+});
+const CtiRunLog = mongoose.model('CtiRunLog', CtiRunLogSchema);
+
+const MAX_CTI_LOG_LINES = 3000;
+let ctiRunnerSocketId = null;
+let ctiRun = { status: 'IDLE', startedAt: null, finishedAt: null, exitCode: null, lines: [] };
+
+const ctiRunPublic = () => ({
+  status: ctiRun.status,
+  startedAt: ctiRun.startedAt,
+  finishedAt: ctiRun.finishedAt,
+  exitCode: ctiRun.exitCode,
+  lineCount: ctiRun.lines.length,
+});
+
+async function finishCtiRun(status, exitCode) {
+  ctiRun.status = status;
+  ctiRun.exitCode = exitCode;
+  ctiRun.finishedAt = new Date();
+  io.emit('cti_run_status', ctiRunPublic());
+  try {
+    await CtiRunLog.findOneAndUpdate({ key: 'last' }, { key: 'last', ...ctiRun }, { upsert: true });
+  } catch (e) {
+    console.error("[-] Sauvegarde du journal CTI impossible :", e);
+  }
+}
 
 
 // Modèle pour stocker les résultats des employés aux formations
@@ -382,12 +433,12 @@ app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
 
   // Création du profil Administrateur (Toi, le RSSI)
-  const adminUser = { 
-    id: "ADMIN-001", 
-    username: "admin", 
-    password: "soc", 
-    role: "RSSI", 
-    name: "Administrateur SOC" 
+  const adminUser = {
+    id: "ADMIN-001",
+    username: "admin",
+    password: "soc",
+    role: "RSSI",
+    name: "Administrateur SOC"
   };
 
   // Vérification stricte
@@ -400,12 +451,12 @@ app.post('/api/login', (req, res) => {
     );
 
     console.log(`[+] Connexion SOC réussie : ${adminUser.name} (Rôle: ${adminUser.role})`);
-    
+
     // On renvoie le token et les infos au front-end
-    return res.json({ 
-      success: true, 
-      token, 
-      user: { name: adminUser.name, role: adminUser.role } 
+    return res.json({
+      success: true,
+      token,
+      user: { name: adminUser.name, role: adminUser.role }
     });
   } else {
     console.log(`[-] Tentative de connexion échouée pour : ${username}`);
@@ -419,7 +470,7 @@ app.post('/api/login', (req, res) => {
 const verifySOCAdmin = (req, res, next) => {
   // 1. On cherche le token dans l'en-tête "Authorization"
   const authHeader = req.headers.authorization;
-  
+
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     console.log(`[-] Accès API refusé (Token manquant) sur ${req.originalUrl}`);
     return res.status(401).json({ error: "Accès refusé. Jeton d'authentification manquant." });
@@ -431,7 +482,7 @@ const verifySOCAdmin = (req, res, next) => {
   try {
     // 3. On vérifie cryptographiquement le token avec notre clé secrète
     const decoded = jwt.verify(token, JWT_SECRET);
-    
+
     // 4. (God's Level) On vérifie le rôle ! Seul le RSSI peut passer.
     if (decoded.role !== 'RSSI') {
       console.log(`[-] Accès API refusé (Privilèges insuffisants) pour ${decoded.username}`);
@@ -572,6 +623,35 @@ io.on('connection', (socket) => {
     }
   });
 
+    // --- Service CTI à la demande ---
+    socket.on('cti_runner_register', () => {
+      ctiRunnerSocketId = socket.id;
+      console.log(`[+] Service CTI enregistré (VM-Response). ID: ${socket.id}`);
+    });
+  
+    socket.on('cti_runner_line', (data) => {
+      if (socket.id !== ctiRunnerSocketId || ctiRun.status !== 'RUNNING') return;
+      const line = String((data && data.line) || '').slice(0, 2000);
+      if (ctiRun.lines.length < MAX_CTI_LOG_LINES) ctiRun.lines.push(line);
+      io.emit('cti_log_line', { line });
+    });
+  
+    socket.on('cti_runner_done', async (data) => {
+      if (socket.id !== ctiRunnerSocketId || ctiRun.status !== 'RUNNING') return;
+      const exitCode = data && typeof data.exitCode === 'number' ? data.exitCode : -1;
+      await finishCtiRun(exitCode === 0 ? 'SUCCESS' : 'FAILED', exitCode);
+    });
+  
+    socket.on('disconnect', async () => {
+      if (socket.id === ctiRunnerSocketId) {
+        ctiRunnerSocketId = null;
+        if (ctiRun.status === 'RUNNING') {
+          ctiRun.lines.push("[!] Service CTI déconnecté pendant l'exécution.");
+          await finishCtiRun('FAILED', -1);
+        }
+      }
+    });
+
   socket.on('new_security_alert', async (alertData) => {
     console.log(`[!] Alerte critique reçue de la Simulation : ${alertData.threatType}`);
     const savedIncident = await SoarCase.create(alertData);
@@ -636,6 +716,8 @@ io.on('connection', (socket) => {
 });
 
 
+
+
 // D. [Cible: Next.js & vm-edge] Mettre à jour le statut d'une règle (PENDING -> APPROVED -> DEPLOYED)
 app.post('/api/rules/update-status', async (req, res) => {
   try {
@@ -658,6 +740,34 @@ app.post('/api/rules/update-status', async (req, res) => {
     res.status(500).json({ error: "Erreur interne" });
   }
 });
+
+app.post('/api/cti/run', verifySOCAdmin, (req, res) => {
+  if (!ctiRunnerSocketId) {
+    return res.status(503).json({ error: "Service CTI hors ligne : agent_cti_runner.py n'est pas connecté sur VM-Response." });
+  }
+  if (ctiRun.status === 'RUNNING') {
+    return res.status(409).json({ error: "Une exécution est déjà en cours." });
+  }
+  ctiRun = { status: 'RUNNING', startedAt: new Date(), finishedAt: null, exitCode: null, lines: [] };
+  io.to(ctiRunnerSocketId).emit('cti_runner_start');
+  io.emit('cti_run_status', ctiRunPublic());
+  res.json({ success: true });
+});
+
+app.get('/api/cti/last-run', verifySOCAdmin, async (req, res) => {
+  try {
+    if (ctiRun.status === 'IDLE') {
+      const last = await CtiRunLog.findOne({ key: 'last' }).lean();
+      if (last) {
+        ctiRun = { status: last.status, startedAt: last.startedAt, finishedAt: last.finishedAt, exitCode: last.exitCode, lines: last.lines || [] };
+      }
+    }
+    res.json({ ...ctiRunPublic(), lines: ctiRun.lines });
+  } catch (e) {
+    res.status(500).json({ error: "Lecture du journal impossible." });
+  }
+});
+
 
 // [Cible: Next.js] L'admin a corrigé la règle manuellement
 app.post('/api/rules/edit', async (req, res) => {
@@ -690,23 +800,18 @@ app.get('/api/rules/pending-deploy', async (req, res) => {
 
 
 
-// Route pour générer le module de formation (Micro-Learning via Gemini)
-app.post('/api/formations/generate', async (req, res) => {
-  try {
-    const { rule_id, titre_menace, resume_ia, source_texte } = req.body;
+// ========================================================
+// Génération des formations (Micro-Learning) — Chaîne de résilience IA
+// Ordre : Gemini (cloud, primaire) -> Mistral (cloud, secours) -> Llama3.2 via Ollama (local, dernier recours)
+// Rationale : un échec de capacité chez un fournisseur cloud (503 "model overloaded", 429 quota)
+// ne doit jamais bloquer la génération. Ollama reste le dernier recours car il partage le GPU
+// avec agent_ia.py / agent_cti.py : cette route ne doit jamais être prioritaire sur une réponse
+// d'incident en cours, elle attend simplement son tour sur la même instance déjà chargée en VRAM.
+// ========================================================
 
-    if (!rule_id) {
-      return res.status(400).json({ error: "L'ID de l'alerte (rule_id) est requis." });
-    }
-
-    // Vérification de validité de l'ObjectId MongoDB
-    if (!mongoose.Types.ObjectId.isValid(rule_id)) {
-      return res.status(400).json({ error: "Format d'ID MongoDB invalide." });
-    }
-
-    console.log(`[+] Lancement de la génération du cours pour : ${titre_menace}`);
-
-    const prompt = `
+// Prompt commun aux 3 fournisseurs — le schéma JSON attendu est strictement identique partout
+function buildFormationPrompt(titre_menace, resume_ia, source_texte) {
+  return `
       Tu es un Expert Pédagogue et Formateur en Cybersécurité (Niveau CISSP / CISO).
       Nous avons détecté l'alerte de sensibilisation suivante :
       - Titre : ${titre_menace}
@@ -769,19 +874,256 @@ app.post('/api/formations/generate', async (req, res) => {
       1. Le champ 'reponse_correcte' doit être un indice entier compris entre 0 et 3 pointant vers la bonne réponse dans le tableau 'options'.
       2. Le champ 'diagramme_mermaid' doit contenir une syntaxe valide (Flowchart ou SequenceDiagram).
       3. Génère entre 5 et 7 questions pertinentes dans le tableau 'quiz'.
-      4. Ne renvoie AUCUNE balise markdown (pas de \`\`\`json).
+      4. Ne renvoie AUCUNE balise markdown (pas de \`\`\`json), AUCUN texte avant ou après l'objet JSON.
     `;
+}
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0.5
+// Répare les erreurs JSON les plus fréquentes chez les petits modèles (Ministral-8B,
+// Llama3.2:3b) : des retours à la ligne bruts (non échappés) laissés A L'INTERIEUR d'une
+// valeur de chaîne (typiquement dans les champs "contenu" rédigés sur plusieurs paragraphes),
+// et des virgules finales avant une accolade/crochet fermant. On ne touche qu'aux caractères
+// réellement situés entre guillemets (suivi d'état inString/escape), jamais à la structure JSON.
+function repairJSONText(str) {
+  let out = '';
+  let inString = false;
+  let escapeNext = false;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (escapeNext) {
+      out += ch;
+      escapeNext = false;
+      continue;
+    }
+    if (ch === '\\') {
+      out += ch;
+      escapeNext = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      out += ch;
+      continue;
+    }
+    if (inString && ch === '\n') { out += '\\n'; continue; }
+    if (inString && ch === '\r') { out += '\\r'; continue; }
+    if (inString && ch === '\t') { out += '\\t'; continue; }
+    out += ch;
+  }
+  return out.replace(/,(\s*[}\]])/g, '$1'); // virgules finales avant } ou ]
+}
+
+// Extrait un objet JSON d'une chaîne, même si le modèle a entouré la réponse de
+// texte parasite ou de balises markdown (fréquent avec les petits modèles locaux type Llama3.2:3b)
+function extractFormationJSON(rawText) {
+  if (!rawText) throw new Error("Réponse vide du modèle.");
+  let cleaned = rawText.trim()
+    .replace(/^```json/i, '')
+    .replace(/^```/, '')
+    .replace(/```$/, '')
+    .trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end === -1 || end < start) {
+    throw new Error("Aucun objet JSON détecté dans la réponse du modèle.");
+  }
+  const jsonSlice = cleaned.slice(start, end + 1);
+  try {
+    return JSON.parse(jsonSlice);
+  } catch (firstErr) {
+    // Tentative de réparation avant d'abandonner (newlines bruts dans les chaînes, virgules finales)
+    try {
+      const repaired = repairJSONText(jsonSlice);
+      const parsed = JSON.parse(repaired);
+      console.warn(`[!] JSON réparé automatiquement (erreur initiale : ${firstErr.message})`);
+      return parsed;
+    } catch (secondErr) {
+      throw new Error(`JSON invalide même après tentative de réparation : ${firstErr.message}`);
+    }
+  }
+}
+
+// Valide que le JSON généré respecte le schéma métier attendu par le frontend.
+// Une réponse malformée (fréquent avec Llama3.2:3b qui respecte moins bien le JSON strict
+// que Gemini/Mistral) déclenche elle aussi la bascule vers le fournisseur suivant.
+function validateFormationSchema(obj) {
+  if (!obj || typeof obj !== 'object') throw new Error("Structure JSON invalide.");
+  if (!obj.titre_cours || typeof obj.titre_cours !== 'string') throw new Error("Champ 'titre_cours' manquant ou invalide.");
+  if (!obj.diagramme_mermaid || typeof obj.diagramme_mermaid !== 'string') throw new Error("Champ 'diagramme_mermaid' manquant ou invalide.");
+  if (!Array.isArray(obj.modules) || obj.modules.length === 0) throw new Error("Champ 'modules' manquant ou vide.");
+  for (const m of obj.modules) {
+    if (!m || !m.chapitre || !m.contenu) throw new Error("Un module est incomplet (chapitre/contenu).");
+  }
+  if (!Array.isArray(obj.quiz) || obj.quiz.length < 5 || obj.quiz.length > 7) throw new Error("Le quiz doit contenir entre 5 et 7 questions.");
+  for (const q of obj.quiz) {
+    if (!q || !q.question || !Array.isArray(q.options) || q.options.length !== 4) throw new Error("Une question du quiz est mal formée.");
+    if (!Number.isInteger(q.reponse_correcte) || q.reponse_correcte < 0 || q.reponse_correcte > 3) throw new Error("Index 'reponse_correcte' invalide dans le quiz.");
+  }
+  return true;
+}
+
+const _formationSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// --- Tier 1 : Gemini (cloud, primaire) ---
+// Chaîne de repli interne entre 2 modèles Gemini + backoff court sur erreurs transitoires
+// (503 "model overloaded", 429 quota) avant de basculer vers Mistral.
+async function generateFormationWithGemini(prompt) {
+  const GEMINI_FALLBACK_MODELS = ['gemini-flash-latest', 'gemini-3.8-flash', 'gemini-3.5-flash-lite'];
+  let lastError;
+  for (const model of GEMINI_FALLBACK_MODELS) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config: { responseMimeType: "application/json", temperature: 0.5 }
+        });
+        const parsed = extractFormationJSON(response.text);
+        validateFormationSchema(parsed);
+        console.log(`[+] Formation générée via Gemini (${model}, tentative ${attempt})`);
+        return { data: parsed, provider: `gemini:${model}` };
+      } catch (err) {
+        lastError = err;
+        const transient = /503|429|overloaded|UNAVAILABLE|RESOURCE_EXHAUSTED/i.test(err.message || '');
+        const modelGone = /404|NOT_FOUND|no longer available|not found for API version/i.test(err.message || '');
+        console.warn(`[!] Gemini (${model}, tentative ${attempt}) échec : ${err.message}`);
+        if (modelGone) break; // ce modèle n'existe plus / plus disponible -> inutile de réessayer, on passe au suivant
+        if (!transient) break; // erreur non transitoire (clé invalide, prompt rejeté...) -> inutile de réessayer ce modèle
+        if (attempt < 2) await _formationSleep(800 * attempt);
       }
-    });
+    }
+  }
+  throw lastError || new Error("Échec Gemini inconnu.");
+}
 
-    const formationJSON = JSON.parse(response.text);
+// --- Tier 2 : Mistral (cloud, secours) ---
+// IMPORTANT : on pin des noms de modèles explicites et versionnés (mistral-small-2603,
+// ministral-8b-2512) plutôt que l'alias 'mistral-small-latest', qui ne correspond à aucun
+// modèle réellement provisionné sur le compte (absent de la page Admin Console -> Limits) et
+// provoquait un 429 trompeur plutôt qu'une erreur claire de modèle introuvable.
+// ministral-8b-2512 sert de repli interne : quota plus large (625K TPM / 3.13 req/s contre
+// 20K TPM / 1 req/s pour mistral-small-2603) et modèle distinct -> bucket de quota séparé.
+async function generateFormationWithMistral(prompt) {
+  // Un seul essai par modèle : un 429 Mistral en environnement "Experiment" est un throttle
+  // au niveau de l'organisation (bucket partagé entre modèles), donc réessayer LE MÊME modèle
+  // retape sur le même bucket. Mieux vaut basculer immédiatement vers un modèle différent,
+  // dont le quota (TPM/req-s) est distinct -> bascule plus rapide, moins d'appels gaspillés.
+  const MISTRAL_FALLBACK_MODELS = ['mistral-small-2603', 'ministral-8b-2512'];
+  let lastError;
+  for (const model of MISTRAL_FALLBACK_MODELS) {
+    try {
+      const response = await mistral.chat.complete({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        responseFormat: { type: 'json_object' },
+        temperature: 0.5
+      });
+      const rawText = response?.choices?.[0]?.message?.content;
+      const parsed = extractFormationJSON(rawText);
+      validateFormationSchema(parsed);
+      console.log(`[+] Formation générée via Mistral (${model})`);
+      return { data: parsed, provider: `mistral:${model}` };
+    } catch (err) {
+      lastError = err;
+      console.warn(`[!] Mistral (${model}) échec : ${err.message}`);
+      // Quelle que soit la cause (429 partagé, modèle non provisionné, JSON invalide...),
+      // on passe directement au modèle suivant de la chaîne plutôt que de réessayer celui-ci.
+    }
+  }
+  throw lastError || new Error("Échec Mistral inconnu.");
+}
+
+// --- Tier 3 : Ollama / Llama3.2 (local, dernier recours) ---
+// Garantit l'autonomie 24/7 du système même si les 2 fournisseurs cloud sont injoignables.
+// Utilise l'instance Ollama déjà chargée en VRAM pour agent_ia.py / agent_cti.py (aucun coût GPU
+// supplémentaire) ; requiert Node.js 18+ pour l'API fetch native.
+async function generateFormationWithOllama(prompt) {
+  const OLLAMA_TIMEOUT_MS = 60000; // les petits modèles locaux peuvent être lents sur un 4GB VRAM
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), OLLAMA_TIMEOUT_MS);
+
+  let res;
+  try {
+    res = await fetch(`${OLLAMA_URL}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        prompt,
+        format: 'json',
+        stream: false,
+        options: { temperature: 0.4 }
+      }),
+      signal: controller.signal
+    });
+  } catch (networkErr) {
+    // "fetch failed" = la connexion elle-même a échoué (Ollama non démarré, mauvais OLLAMA_URL,
+    // port bloqué, ou timeout) — ce n'est PAS une erreur HTTP, donc res n'existe pas ici.
+    if (networkErr.name === 'AbortError') {
+      throw new Error(`Ollama injoignable : délai de ${OLLAMA_TIMEOUT_MS}ms dépassé sur ${OLLAMA_URL} (le modèle ${OLLAMA_MODEL} met-il trop de temps à répondre ?).`);
+    }
+    throw new Error(`Ollama injoignable à ${OLLAMA_URL} — vérifier que le service Ollama est démarré ('ollama serve'), que le modèle '${OLLAMA_MODEL}' est bien présent ('ollama list'), et que OLLAMA_URL pointe vers la bonne machine/port. Détail : ${networkErr.message}`);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (!res.ok) {
+    throw new Error(`Ollama HTTP ${res.status} : ${await res.text()}`);
+  }
+  const body = await res.json();
+  const parsed = extractFormationJSON(body.response);
+  validateFormationSchema(parsed);
+  console.log(`[+] Formation générée via Ollama local (${OLLAMA_MODEL})`);
+  return { data: parsed, provider: `ollama:${OLLAMA_MODEL}` };
+}
+
+// Route pour générer le module de formation (Micro-Learning)
+// Chaîne de résilience : Gemini (cloud) -> Mistral (cloud) -> Llama3.2 via Ollama (local)
+app.post('/api/formations/generate', async (req, res) => {
+  try {
+    const { rule_id, titre_menace, resume_ia, source_texte } = req.body;
+
+    if (!rule_id) {
+      return res.status(400).json({ error: "L'ID de l'alerte (rule_id) est requis." });
+    }
+
+    // Vérification de validité de l'ObjectId MongoDB
+    if (!mongoose.Types.ObjectId.isValid(rule_id)) {
+      return res.status(400).json({ error: "Format d'ID MongoDB invalide." });
+    }
+
+    console.log(`[+] Lancement de la génération du cours pour : ${titre_menace}`);
+
+    const prompt = buildFormationPrompt(titre_menace, resume_ia, source_texte);
+
+    let result;
+    const providersTried = [];
+
+    try {
+      result = await generateFormationWithGemini(prompt);
+    } catch (errGemini) {
+      providersTried.push(`gemini(échec: ${errGemini.message})`);
+      console.warn('[!] Bascule vers Mistral après échec Gemini.');
+      try {
+        result = await generateFormationWithMistral(prompt);
+      } catch (errMistral) {
+        providersTried.push(`mistral(échec: ${errMistral.message})`);
+        console.warn('[!] Bascule vers Llama3.2 local (Ollama) après échec Mistral.');
+        try {
+          result = await generateFormationWithOllama(prompt);
+        } catch (errOllama) {
+          providersTried.push(`ollama(échec: ${errOllama.message})`);
+          console.error('[-] Échec des 3 fournisseurs IA pour la génération de formation.', providersTried);
+          return res.status(503).json({
+            error: "Échec de la génération de la formation : Gemini, Mistral et Llama3.2 local sont tous indisponibles.",
+            details: providersTried
+          });
+        }
+      }
+    }
+
+    const formationJSON = result.data;
+    // Traçabilité : conserve le fournisseur qui a effectivement généré le contenu (utile pour le rapport/soutenance)
+    formationJSON._meta_provider = result.provider;
 
     // Sauvegarde dans MongoDB avec le statut mis à jour
     const updatedAlert = await CtiActuality.findByIdAndUpdate(
@@ -798,17 +1140,31 @@ app.post('/api/formations/generate', async (req, res) => {
       return res.status(404).json({ error: "Alerte CTI introuvable dans la base de données." });
     }
 
-    console.log(`[+] Formation générée et enregistrée avec succès pour l'ID: ${rule_id}`);
+    console.log(`[+] Formation générée (${result.provider}) et enregistrée avec succès pour l'ID: ${rule_id}`);
+
+    // Notification temps réel (même mécanisme Socket.io que soar_incident_incoming / dashboard_update)
+    // pour alerter le RSSI dans le centre de notifications dès qu'une formation est prête, et
+    // signaler si une bascule (fallback) IA a eu lieu pendant la génération.
+    io.emit('formation_generated', {
+      rule_id,
+      titre_menace,
+      titre_cours: formationJSON.titre_cours,
+      provider: result.provider,
+      isFallback: !result.provider.startsWith('gemini:'),
+      generated_at: Date.now()
+    });
+
     res.json({
       message: "Formation générée avec succès !",
       formation: formationJSON
     });
 
   } catch (error) {
-    console.error("[-] Erreur de l'Agent Cloud Gemini :", error);
+    console.error("[-] Erreur inattendue lors de la génération de la formation :", error);
     res.status(500).json({ error: "Échec de la génération de la formation.", details: error.message });
   }
 });
+
 
 
 // 1. Route pour récupérer la liste complète des départements et employés
@@ -832,7 +1188,7 @@ app.get('/api/employes', (req, res) => {
 // ========================================================
 // ROUTE : DIFFUSION PERSONNALISÉE DU FORMATION
 // ========================================================
-app.post('/api/formations/distribute',verifySOCAdmin, async (req, res) => {
+app.post('/api/formations/distribute', verifySOCAdmin, async (req, res) => {
   try {
     const { rule_id, formation_data, targetType, targetValue } = req.body;
 
@@ -846,15 +1202,21 @@ app.post('/api/formations/distribute',verifySOCAdmin, async (req, res) => {
 
     let destinataires = [];
 
-    // NOUVEAU : Récupération des objets employés complets (au lieu de juste l'email)
     if (targetType === "DEPARTEMENT" && targetValue && annuaire[targetValue]) {
       destinataires = annuaire[targetValue];
     } else {
-      // "ALL" : On fusionne tous les tableaux d'employés
       Object.values(annuaire).forEach(departementList => {
         destinataires.push(...departementList);
       });
     }
+
+    // NOUVEAU : persiste la cible réelle de cette campagne -- condition
+    // sine qua non pour que la vérification d'éligibilité fonctionne.
+    await CtiActuality.findByIdAndUpdate(rule_id, {
+      cible_diffusion_type: targetType === "DEPARTEMENT" ? "DEPARTEMENT" : "ALL",
+      cible_diffusion_value: targetType === "DEPARTEMENT" ? targetValue : null,
+      date_diffusion: new Date(),
+    });
 
     if (destinataires.length === 0) {
       return res.status(400).json({ error: "Aucun destinataire trouvé pour cette cible." });
@@ -925,37 +1287,62 @@ app.post('/api/formations/distribute',verifySOCAdmin, async (req, res) => {
 // ========================================================
 // ROUTE : VÉRIFICATION DE L'ID EMPLOYÉ (LOGIN LMS)
 // ========================================================
-app.post('/api/employes/verify', (req, res) => {
-  const { id_employe } = req.body;
+app.post('/api/employes/verify', async (req, res) => {
+  const { id_employe, courseId } = req.body;
 
   if (!id_employe) {
     return res.status(400).json({ success: false, error: "Identifiant requis." });
+  }
+  if (!courseId) {
+    return res.status(400).json({ success: false, error: "Identifiant de cours requis." });
   }
 
   const fs = require('fs');
   const path = require('path');
 
   try {
+    // 1. Récupérer la campagne de diffusion de CE cours précis
+    const campagne = await CtiActuality.findById(courseId);
+    if (!campagne || !campagne.cible_diffusion_type) {
+      return res.status(404).json({ success: false, error: "Ce cours n'a pas encore été diffusé." });
+    }
+
+    // 2. Retrouver l'employé ET son département réel
     const annuaire = JSON.parse(fs.readFileSync(path.join(__dirname, 'employes.json'), 'utf8'));
     let employeTrouve = null;
+    let departementTrouve = null;
 
-    // Parcours de tous les départements pour trouver l'ID
-    Object.values(annuaire).forEach(departementList => {
-      const found = departementList.find(emp => emp.id_employe === id_employe);
-      if (found) employeTrouve = found;
+    Object.entries(annuaire).forEach(([departement, liste]) => {
+      const found = liste.find(emp => emp.id_employe === id_employe);
+      if (found) {
+        employeTrouve = found;
+        departementTrouve = departement;
+      }
     });
 
-    if (employeTrouve) {
-      res.json({ success: true, employe: employeTrouve });
-    } else {
-      res.status(401).json({ success: false, error: "Identifiant introuvable ou invalide." });
+    if (!employeTrouve) {
+      return res.status(401).json({ success: false, error: "Identifiant introuvable ou invalide." });
     }
+
+    // 3. VÉRIFICATION D'ÉLIGIBILITÉ -- le vrai correctif de sécurité
+    const estEligible =
+      campagne.cible_diffusion_type === "ALL" ||
+      (campagne.cible_diffusion_type === "DEPARTEMENT" && campagne.cible_diffusion_value === departementTrouve);
+
+    if (!estEligible) {
+      return res.status(403).json({
+        success: false,
+        error: "Identifiant valide, mais vous n'êtes pas éligible à ce module de formation."
+      });
+    }
+
+    res.json({ success: true, employe: { ...employeTrouve, departement: departementTrouve } });
+    
   } catch (err) {
-    console.error("Erreur de lecture annuaire :", err);
+    console.error("Erreur de vérification d'éligibilité :", err);
     res.status(500).json({ success: false, error: "Erreur serveur interne." });
   }
 });
-
 // ========================================================
 // ROUTES : SUIVI DES RÉSULTATS DE FORMATION
 // ========================================================
@@ -964,14 +1351,14 @@ app.post('/api/employes/verify', (req, res) => {
 app.post('/api/formations/submit', async (req, res) => {
   try {
     const { courseId, courseTitle, employeeId, employeeName, department, score } = req.body;
-    
+
     // findOneAndUpdate avec upsert : Si l'employé refait le test, on garde son dernier score
     const record = await FormationRecord.findOneAndUpdate(
       { courseId, employeeId },
       { courseTitle, employeeName, department, score, completedAt: Date.now() },
       { upsert: true, new: true }
     );
-    
+
     console.log(`[🎓 LMS] Résultat enregistré : ${employeeName} a obtenu ${score}% au module "${courseTitle.substring(0, 20)}..."`);
     res.json({ success: true, record });
   } catch (error) {
@@ -997,17 +1384,17 @@ app.get('/api/formations/records', verifySOCAdmin, async (req, res) => {
 app.post('/api/briefing', verifySOCAdmin, async (req, res) => {
   try {
     const { last_logout } = req.body;
-    
+
     // Si pas de date de déconnexion (première fois), on recule de 12 heures par défaut
     const sinceDate = last_logout ? new Date(last_logout) : new Date(Date.now() - 12 * 60 * 60 * 1000);
 
     // 1. Récupération des incidents SOAR survenus pendant l'absence
     const incidents = await SoarCase.find({ timestamp: { $gte: sinceDate } }).sort({ timestamp: -1 });
-    
+
     // On isole ceux que l'Auto-Pilote (Mode Nuit) a gérés tout seul
-    const autoBlocked = incidents.filter(inc => 
-      inc.caseStatus.includes('Nuit') || 
-      inc.caseStatus.includes('Auto-Pilote') || 
+    const autoBlocked = incidents.filter(inc =>
+      inc.caseStatus.includes('Nuit') ||
+      inc.caseStatus.includes('Auto-Pilote') ||
       inc.caseStatus.includes('bloqué')
     );
     const criticalAlerts = incidents.filter(inc => inc.aiConfidenceScore >= 80);
@@ -1028,7 +1415,7 @@ app.post('/api/briefing', verifySOCAdmin, async (req, res) => {
         new_formations: formationsGenerated.length
       },
       // On renvoie les 3 incidents les plus récents pour un aperçu rapide
-      recent_incidents: incidents.slice(0, 3) 
+      recent_incidents: incidents.slice(0, 3)
     });
 
     console.log(`[+] Briefing généré pour la période depuis : ${sinceDate.toISOString()}`);
@@ -1063,8 +1450,8 @@ app.get('/api/simulate-attack', (req, res) => {
       mitre_attack_technique: "T1071.001 (Web Protocols)",
       analyse_technique: "Payload injecté manuellement pour vérifier le routage WebSocket, l'API Web Audio et les modales React.",
       recommandations_actions: [
-        "Vérifier le rendu de la modale globale", 
-        "Valider le déclenchement du bip sonore", 
+        "Vérifier le rendu de la modale globale",
+        "Valider le déclenchement du bip sonore",
         "Vérifier le routage email de secours si hors ligne"
       ]
     }
