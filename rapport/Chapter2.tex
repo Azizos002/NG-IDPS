@@ -38,7 +38,7 @@ L'analyse débute par l'identification des acteurs susceptibles d'interagir dire
 
 Dans le cadre de la modélisation UML, un acteur désigne une entité extérieure au système qui interagit avec celui-ci afin de déclencher une fonctionnalité ou de lui fournir des informations \cite{omg2017uml}. L'identification des acteurs permet ainsi de délimiter le périmètre fonctionnel de NG-IDPS et de définir les principales interactions représentées dans le diagramme de cas d'utilisation présenté à la section~\ref{sec:uc}.
 
-Quatre catégories d'acteurs externes sont retenues pour NG-IDPS : l'administrateur SOC, l'employé, l'attaquant et les sources de renseignement. Leurs rôles et leurs interactions principales avec le système sont présentés dans le tableau~\ref{tab:acteurs}.
+Trois catégories d'acteurs externes sont retenues pour NG-IDPS : l'administrateur SOC, l'employé et les sources de renseignement. Leurs rôles et leurs interactions principales avec le système sont présentés dans le tableau~\ref{tab:acteurs}.
 
 % Prérequis à inclure dans votre préambule :
 % \usepackage{xltabular}
@@ -68,10 +68,6 @@ Analyste ou responsable de la sécurité. Il supervise l'état du système, cons
 
 Employé & Principal &
 Collaborateur de l'organisation susceptible d'être concerné par un incident de sécurité. Il peut recevoir des communications ou des actions de sensibilisation générées par le système. \\
-\hline
-
-Attaquant & Externe &
-Source potentielle de trafic ou d'activité malveillante susceptible d'être détectée par NG-IDPS. Dans l'environnement expérimental, cet acteur est représenté par une machine dédiée exécutant Kali Linux. \\
 \hline
 
 Sources de renseignement & Externe &
@@ -264,7 +260,7 @@ La figure~\ref{fig:uc-global} synthétise les besoins précédents. Nous avons c
 
 \begin{figure}[h]
   \centering
-  \includegraphics[width=0.9\textwidth]{../diagrams/useCaseGlobal.png}
+  \includegraphics[width=0.9\textwidth]{../diagrams/useCaseGlobal.drawio.png}
   \caption{Diagramme de cas d'utilisation global de NG-IDPS}
   \label{fig:uc-global}
 \end{figure}
@@ -409,7 +405,7 @@ Côté système invité, nous avons retenu Ubuntu Server en version à support l
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.25\textwidth]{../logo/VMware_Workstation.png}
+  \includegraphics[width=0.4\textwidth]{../logo/VMware_Workstation.png}
   \caption{Logo VMware Workstation Pro}
   \label{fig:Logo_VMware_Workstation_Pro}
 \end{figure}
@@ -464,7 +460,7 @@ Un dernier choix mérite d'être expliqué : Suricata fonctionne ici en mode IDS
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.3\textwidth]{../logo/Suricata.png}
+  \includegraphics[width=0.4\textwidth]{../logo/Suricata.png}
   \caption{Logo Suricata}
   \label{fig:Logo_Suricata}
 \end{figure}
@@ -506,7 +502,7 @@ L'argument décisif est l'ingestion : Filebeat sait lire les journaux EVE de Sur
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.35\textwidth]{../logo/elk.png}
+  \includegraphics[width=0.4\textwidth]{../logo/elk.png}
   \caption{Logo Elastic Stack}
   \label{fig:Logo_Elastic_Stack}
 \end{figure}
@@ -554,7 +550,7 @@ Le travail de Dobbelaere et Esmaili donne le contexte le plus utile : Kafka atte
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.35\textwidth]{../logo/kafka.png}
+  \includegraphics[width=0.4\textwidth]{../logo/kafka.png}
   \caption{Logo Kafka}
   \label{fig:Logo_Kafka}
 \end{figure}
@@ -591,7 +587,7 @@ Le critère le plus lourd est la modélisation temporelle : une attaque réseau 
 \textbf{Critère} & \textbf{Poids} & \textbf{Forêt d'isol.} & \textbf{SVM 1 classe} & \textbf{Deep SVDD} & \textbf{AE dense} & \textbf{LSTM-VAE} \\ \hline
 \endhead
 
-Modélisation temporelle & 0,30 & 2 & 2 & 2 & 2 & 5 \\ \hline
+Modéli\-sation temporelle & 0,30 & 2 & 2 & 2 & 2 & 5 \\ \hline
 Non-linéarité, haute dimension & 0,20 & 3 & 4 & 5 & 4 & 5 \\ \hline
 Latence d'inférence & 0,20 & 5 & 3 & 4 & 5 & 4 \\ \hline
 Score exploitable et calibrable & 0,15 & 3 & 3 & 2 & 3 & 4 \\ \hline
@@ -604,7 +600,7 @@ Le LSTM-VAE domine surtout grâce au premier critère. La forêt d'isolation est
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.45\textwidth]{../logo/LSTM-VAE.png}
+  \includegraphics[width=0.8\textwidth,height=0.35\textheight,keepaspectratio]{../logo/LSTM-VAE.png}
   \caption{Modèle Deep LSTM-VAE}
   \label{fig:Logo_lstm_vae}
 \end{figure}
@@ -751,7 +747,7 @@ Nous avons donc écrit notre propre moteur SOAR. Le compromis est assumé : nous
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.30\textwidth]{../logo/python.png}
+  \includegraphics[width=0.25\textwidth]{../logo/python.png}
   \caption{Logo Python}
   \label{fig:Logo_Python}
 \end{figure}
@@ -965,7 +961,6 @@ Le tableau~\ref{tab:synthese} récapitule la pile retenue et rappelle sur quel n
 \endfirsthead
 
 % En-tête pour les pages suivantes (si le tableau est coupé)
-\multicolumn{4}{c}{\tablename\ \thetable{} -- suite de la page précédente} \\
 \hline
 \rowcolor[HTML]{EFEFEF}
 \textbf{Couche} & \textbf{Technologie retenue} & \textbf{Version} & \textbf{Nœud} \\ \hline
@@ -1075,7 +1070,7 @@ NG-IDPS est un système distribué, événementiel et faiblement couplé : ses c
 \label{fig:archi}
 \end{figure}
 
-Les échanges reposent sur cinq topics Kafka (tableau~\ref{tab:topics}).
+Les échanges reposent sur cinq topics Kafka présenté dans le tableau \ref{tab:topics}.
 
 % Prérequis dans le préambule :
 % \usepackage{xltabular}

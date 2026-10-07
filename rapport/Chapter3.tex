@@ -114,12 +114,12 @@ De plus, le mode d'équilibrage de charge \textit{cluster\_flow} a été activé
 
 En matière de bonne gouvernance système, nous avons établi une contrainte stricte sur la VM Edge : l'exécution de tâches lourdes d'Entrée/Sortie (I/O) ou de mises à jour système est proscrite durant les phases de capture pour prévenir toute famine CPU (\textit{CPU starvation}) induisant des pertes de paquets (\textit{Packet Drops}).
 
-\begin{figure}[H]
-\centering
-    \includegraphics[width=0.75\textwidth]{../screenshots/s1-suricataConfig.png}
-\caption{Extrait de configuration \texttt{suricata.yaml}}
-\label{fig:suricata_yaml_config}
-\end{figure}
+% \begin{figure}[H]
+% \centering
+%     \includegraphics[width=0.75\textwidth]{../screenshots/s1-suricataConfig.png}
+% \caption{Extrait de configuration \texttt{suricata.yaml}}
+% \label{fig:suricata_yaml_config}
+% \end{figure}
 
 
 \subsection{Validation de la Télémétrie Sérialisée}
@@ -432,13 +432,9 @@ L'échantillonnage stochastique dans l'espace latent bloquant par définition le
 \label{subsec:fine_tuning}
 L'entraînement a été conduit avec l'optimiseur \textbf{Adam}, un \texttt{batch\_size} de 128, et le rappel Keras \texttt{EarlyStopping} (patience de 10 époques sur la perte de validation), évitant de fixer arbitrairement un nombre d'époques : l'entraînement s'interrompt organiquement lorsque \texttt{val\_loss} cesse de s'améliorer, et seuls les poids synaptiques optimaux sont restaurés et sérialisés. La taille de fenêtre temporelle ($T=10$) résulte d'un compromis pragmatique entre richesse contextuelle et latence d'inférence, plutôt que d'un balayage systématique -- un point explicitement identifié comme axe d'amélioration méthodologique (cf. Limites, \S\ref{subsec:limites_generalisation}).
 
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.9\textwidth]{../screenshots/train_logs_2.png}
-\caption{Logs d'exécution de l'entraînement du modèle LSTM-VAE}
-\label{fig:logs_execution_ia}
-\end{figure}
+Le modèle déployé (architecture 64-32-16-32-64, seize caractéristiques, fenêtre de dix pas) a été entraîné en 4\,480 secondes, soit environ 1\,h\,15. Pour documenter le coût de la procédure, un réentraînement complet a été réalisé pour ce rapport : 11\,367 pas par époque, 16 à 17 millisecondes par pas, soit environ trois minutes par époque sur processeur, sans accélération matérielle. Prévu pour 50 époques au maximum, il s'est arrêté de lui-même à la dix-septième, la meilleure perte de validation ayant été atteinte à la septième. Ses seuils $\mu+1\sigma = 58,44$ et $\mu+3\sigma = 98,09$ sont à moins de 0,5\,\% de ceux du modèle déployé (58,28 et 97,62), ce qui confirme la reproductibilité de la procédure.
 
+À l'issue de l'entraînement, l'erreur de reconstruction (MSE) sur le jeu de validation bénin a pour moyenne $\mu = 38,62$ et pour écart-type $\sigma = 19,67$. Le seuil de décision déployé en production est $\tau = \mu + 1,5\sigma = 68,12$, retenu après comparaison de quatre points de fonctionnement : l'optimum $F_1$ (37,77), $1,5\sigma$ (68,12), $2\sigma$ (77,95) et $3\sigma$ (97,62) (\S\ref{subsec:threshold_scaling}, tableau~\ref{tab:comparaison_seuils}). Ce seuil global est complété, pour la règle de vote, par seize seuils individuels fixés au 98\textsuperscript{e} percentile de l'erreur de chaque caractéristique sur le jeu de validation bénin.
 
 \subsection{Réalisation : Calibration Rigoureuse du Seuil de Décision}
 \label{subsec:threshold_scaling}
@@ -451,7 +447,22 @@ Une première anomalie méthodologique a été identifiée en cours de projet : 
 \subsubsection{Méthodologie de Calibration Rigoureuse}
 Après correction, une méthodologie de calibration indépendante du jeu de test final a été mise en œuvre : le jeu de test est scindé en un sous-ensemble de \textbf{calibration} (50\,\%, stratifié) utilisé exclusivement pour choisir le seuil, et un sous-ensemble de \textbf{test final} (50\,\%) sur lequel les métriques sont rapportées -- évitant tout biais optimiste de calibration sur les mêmes données que celles utilisées pour le reporting.
 
-Sur le sous-ensemble de calibration, la courbe \acrshort{roc} et la courbe Précision-Rappel ont été tracées, produisant une aire sous la courbe \acrshort{roc} de $\text{AUC-ROC}=0,79$ et une aire sous la courbe Précision-Rappel de $\text{AUC-PR}=0,84$ -- mesures indépendantes du choix d'un seuil particulier \cite{fawcett2006roc}. Plusieurs critères de sélection ont ensuite été comparés : indice de Youden ($\max(\text{TPR}-\text{FPR})$), optimum du score $F_1$, optimum du score $F_2$ (pondérant le rappel), un critère sensible au coût (pondération $10\times$ pour un faux négatif), et des points de fonctionnement à taux de faux positifs fixé (1\,\%, 5\,\%, 10\,\%).
+Sur le sous-ensemble de calibration, la courbe \acrshort{roc} (\textit{Receiver Operating Characteristic}) et la courbe Précision-Rappel ont été tracées (figure~\ref{fig:courbes_roc_pr}), produisant une aire sous la courbe \acrshort{roc} de $\text{AUC-ROC}=0,79$ et une aire sous la courbe Précision-Rappel de $\text{AUC-PR}=0,84$ -- mesures indépendantes du choix d'un seuil particulier \cite{fawcett2006roc}. Ces courbes décrivent le comportement du détecteur pour l'ensemble des seuils possibles, et non pour un seuil unique : la première met en regard le taux de vrais positifs (part des attaques détectées) et le taux de faux positifs (part des séquences bénignes signalées à tort) lorsque le seuil sur l'erreur de reconstruction varie ; la seconde met en regard la précision (part des alertes qui correspondent à une vraie attaque) et le rappel.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.7\textwidth]{../screenshots/courbes_roc_pr.png}
+\caption{Courbes ROC et Précision-Rappel sur le jeu de calibration}
+\label{fig:courbes_roc_pr}
+\end{figure}
+
+Ces courbes révèlent un comportement très contrasté, que la seule valeur d'$\text{AUC-ROC}=0,79$ résume mal. La courbe \acrshort{roc} s'élève très vite : environ la moitié des attaques est détectée pour moins de 5\,\% de séquences bénignes signalées à tort. Elle se stabilise ensuite sur un long plateau (rappel d'environ 0,52 à 0,55 pour des taux de faux positifs de 10 à 38\,\%), où abaisser le seuil n'apporte presque aucun gain. Deux marches verticales apparaissent enfin, à des taux de faux positifs d'environ 38\,\% (le rappel passe de 0,55 à 0,84) puis 48\,\% (de 0,84 à 0,96). Une marche verticale traduit un groupe important de séquences d'attaque dont les erreurs de reconstruction sont presque identiques et se situent dans la partie haute de la distribution des séquences bénignes : ces attaques ne se distinguent du trafic normal qu'au prix d'un taux de fausses alertes inacceptable en exploitation. Le détecteur sépare donc très bien environ la moitié des attaques, et à peine l'autre moitié.
+
+La courbe Précision-Rappel confirme cette lecture. La précision reste supérieure à 0,95 jusqu'à un rappel d'environ 0,48, puis chute brutalement (de 0,95 à 0,65 pour un rappel de 0,48 à 0,55) dès que le seuil atteint la zone où les séquences bénignes deviennent nombreuses ; elle remonte ensuite partiellement lorsque les deux groupes d'attaques sont captés. En fin de courbe, la précision tend vers environ 0,55 : à rappel total, elle égale la proportion d'attaques du jeu de calibration, qui constitue la ligne de base d'un classifieur sans pouvoir discriminant. Le $\text{AUC-PR}=0,84$ se lit donc par rapport à cette ligne de base et non à zéro.
+
+Deux enseignements en découlent pour le choix du seuil. D'une part, l'optimum du score $F_1$ se situe au sommet de la seconde marche, à un taux de faux positifs d'environ 48\,\% : près de la moitié du trafic bénin serait signalée, ce qui le rend inutilisable en production. D'autre part, le point de fonctionnement finalement retenu ($1,5\sigma$, taux de faux positifs de 9,23\,\%, rappel de 51,89\,\%) se situe à l'entrée du plateau : il capte la quasi-totalité des attaques bien séparées pour moins de 10\,\% de fausses alertes, ce qui correspond, avec la proportion d'attaques du jeu, à une précision d'environ 0,87. % À VÉRIFIER : valeur calculée (formule de la précision), pas lue dans un fichier -- la remplacer par la précision de rapport_1.5sigma_by_type.json si elle y figure.
+Aucun critère statistique unique ne suffit donc à trancher ; plusieurs critères de sélection ont ensuite été comparés : indice de Youden ($\max(\text{TPR}-\text{FPR})$), optimum du score $F_1$, optimum du score $F_2$ (pondérant le rappel), un critère sensible au coût (pondération $10\times$ pour un faux négatif), et des points de fonctionnement à taux de faux positifs fixé (1\,\%, 5\,\%, 10\,\%).
+
 
 \subsubsection{Comparaison des Points de Fonctionnement Retenus}
 Quatre seuils candidats, tous évalués sur le jeu de test final (jamais vu pendant la calibration) selon la règle de décision hybride complète (vote $\geq 4$ caractéristiques au-delà de leur seuil individuel \textbf{OU} erreur globale au-delà du seuil), ont été comparés par type d'attaque. Le tableau \ref{tab:comparaison_seuils} synthétise ce résultat central.
@@ -481,13 +492,6 @@ $F_1$-optimal (37,77) & 48,32\,\% & 96,31\,\% & 100,00\,\% & 96,83\,\% & 100,00\
 \end{xltabular}
 
 Le seuil $1,5\sigma$ ($\tau = 68,12$) a été retenu comme point de fonctionnement opérationnel : il ramène le taux de faux positifs de 48,32\,\% (optimum $F_1$, inexploitable en production) à 9,23\,\%, tout en préservant le rappel sur les catégories les plus dégradées aux seuils supérieurs (FTP-Patator, Infiltration). Cette calibration est documentée et justifiée directement dans les métadonnées du modèle produites en fin d'entraînement, garantissant la traçabilité du choix.
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.7\textwidth]{../screenshots/courbes_roc_pr.png}
-\caption{Courbes ROC et Précision-Rappel sur le jeu de calibration}
-\label{fig:courbes_roc_pr}
-\end{figure}
 
 \subsection{Validation : Étude Comparative des Architectures de Détection}
 \label{subsec:etude_comparative}
@@ -521,12 +525,6 @@ Recall DDoS & 83,98\,\% & 84,31\,\% & 83,79\,\% \\ \hline
 
 Ce résultat, bien que le rappel global agrégé soit quasi identique entre les trois modèles ($\approx$ 50--52\,\%), révèle une divergence radicale par type d'attaque : \textbf{sans la composante variationnelle}, le LSTM-Autoencodeur perd intégralement la capacité de détection sur les attaques par force brute (0,00\,\% contre 98,01\,\%), tandis qu'\textbf{Isolation Forest}, dénué de toute modélisation temporelle, présente un taux de faux positifs prohibitif (57,36\,\%) en configuration non supervisée honnête. Ce résultat valide empiriquement, avec preuve chiffrée, les deux choix architecturaux justifiés qualitativement en \S\ref{subsec:choix_algorithmique} : la modélisation séquentielle (LSTM) est décisive pour les attaques répétitives, et la régularisation variationnelle (VAE) est décisive pour la sensibilité fine du détecteur.
 
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.8\textwidth]{../screenshots/isolation_forest_comparaison.png}
-\caption{Sortie du script d'évaluation comparative Isolation Forest (mêmes features/train/test que le LSTM-VAE)}
-\label{fig:comparaison_if}
-\end{figure}
 
 \subsection{Validation : Tests sur Données Synthétiques et Limites de Généralisation}
 \label{subsec:limites_generalisation}
@@ -538,12 +536,12 @@ Pour chaque type d'attaque, des séquences synthétiques ont été construites �
 \subsubsection{Test d'Isolation du Cas PortScan}
 Un test synthétique dédié, construit à partir du profil statistique réel de 158\,804 flux \textit{PortScan}, démontre que même le signal le plus pur possible (moyenne exacte, variance nulle, répétée sur les 10 pas de temps de la fenêtre) reste très largement sous le seuil de décision (MSE $=41,74$ pour un seuil $=68,12$). Ce résultat élimine définitivement les hypothèses de sous-calibration du seuil ou de dilution par variance : le signal distinctif d'un scan de ports (diversité des ports de destination contactés par une même source) est structurellement absent de l'espace des 16 caractéristiques de niveau flux, quel que soit le modèle ou le seuil retenu.
 
-\begin{figure}[H]
-\centering
-% [PLACEHOLDER FIGURE : test_portscan_synthetique_output.png]
-\caption{Sortie du test synthétique isolant la cause de l'angle mort PortScan}
-\label{fig:test_portscan_synth}
-\end{figure}
+% \begin{figure}[H]
+% \centering
+% % [PLACEHOLDER FIGURE : test_portscan_synthetique_output.png]
+% \caption{Sortie du test synthétique isolant la cause de l'angle mort PortScan}
+% \label{fig:test_portscan_synth}
+% \end{figure}
 
 \subsubsection{Test de Généralisation Hors-Distribution}
 Un jeu de données artificiel, construit sans lecture d'aucune statistique CICIDS2017 (profils raisonnés à partir de connaissances réseau générales, exprimés en fractions de la plage normalisée apprise par le \texttt{MinMaxScaler}), a été soumis au modèle final. Après correction de deux artefacts méthodologiques identifiés en cours de test (encodage des drapeaux TCP en valeurs binaires plutôt que continues, variance temporelle artificiellement nulle), un profil de trafic bénin générique reste néanmoins classé comme anormal par le modèle. Ce résultat, honnête et reproductible sur trois tentatives indépendantes, illustre une propriété connue des détecteurs d'anomalies par reconstruction : la frontière de normalité apprise reflète une variété de corrélations conjointes spécifique à la distribution d'entraînement, non une région définie par des bornes indépendantes par variable. Cette limite est documentée comme telle en \S\ref{sec:limites_chapitre} et justifie \textit{a posteriori} le choix architectural d'un déploiement on-premise calibré localement plutôt qu'un modèle générique transférable tel quel.
@@ -637,12 +635,12 @@ Ce mécanisme de confiance, comme tout mécanisme fondé sur l'adresse IP source
 
 Cette protection a été validée par une attaque réelle d'empoisonnement ARP (\texttt{arpspoof}) menée depuis Kali Linux contre le nœud d'inférence, en se faisant passer pour \texttt{vm-edge} (figure~\ref{fig:arp_spoofing_test}). En haut, la machine d'attaque émet en boucle des réponses ARP associant l'adresse de \texttt{vm-edge} à sa propre adresse MAC. En bas, la table de voisinage du nœud protégé, relevée pendant l'attaque, affiche toujours l'adresse MAC légitime de \texttt{vm-edge}, et le compteur de la règle progresse sur trois relevés successifs : 20, 22 puis 39 paquets rejetés (920, 1\,012 puis 1\,794 octets), tandis que la politique par défaut continue d'accepter le reste du trafic ARP (99 puis 114 paquets). Les trames falsifiées sont ainsi interceptées avant d'atteindre la table de résolution ARP du système.
 
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.9\textwidth]{../screenshots/test-ARPspoofing.png}
-\caption{Test d'empoisonnement ARP}
-\label{fig:arp_spoofing_test}
-\end{figure}
+% \begin{figure}[H]
+% \centering
+% \includegraphics[width=0.9\textwidth]{../screenshots/test-ARPspoofing.png}
+% \caption{Test d'empoisonnement ARP}
+% \label{fig:arp_spoofing_test}
+% \end{figure}
 
 \subsection{Validation : Convergence, Latence et Faux Positifs en Conditions Opérationnelles}
 
@@ -655,14 +653,10 @@ L'entraînement du modèle s'est stabilisé grâce à l'\texttt{EarlyStopping}, 
 \label{fig:convergence_lstmvae}
 \end{figure}
 
-Les journaux d'inférence en production (Figure \ref{fig:realtime_logs}) certifient une latence computationnelle unitaire de l'ordre de \textbf{2 à 4 millisecondes} par séquence, cohérente avec la pré-compilation des graphes Tensor via le décorateur Keras \texttt{@tf.function(reduce\_retracing=True)} et le \textit{warm-up} du modèle au démarrage du service.
+Les journaux d'inférence en production certifient une latence computationnelle unitaire de l'ordre de \textbf{2 à 4 millisecondes} par séquence, cohérente avec la pré-compilation des graphes Tensor via le décorateur Keras \texttt{@tf.function(reduce\_retracing=True)} et le \textit{warm-up} du modèle au démarrage du service.
 
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.8\textwidth]{../screenshots/realtime_interface_logs.png}
-\caption{Traces de corrélation temps réel (MSE, votes, persistance) validant l'étouffement du bruit résiduel}
-\label{fig:realtime_logs}
-\end{figure}
+Chaque évaluation produit une ligne de trace unique qui rassemble les signaux de la règle de décision : l'erreur de reconstruction globale, confrontée au seuil de 68,12 ; le nombre de caractéristiques individuelles au-delà de leur seuil (votes, sur seize) ; le nombre d'évaluations anormales parmi les cinq dernières (persistance) ; et la latence de l'inférence. En régime nominal, sur les hôtes de la liste blanche, l'erreur reste stable autour de 10, très en deçà du seuil, avec zéro ou un vote et aucune évaluation anormale récente. Lors d'une attaque, les mêmes traces montrent une rupture nette : erreurs de 104 (balayage de ports) à 225 (force brute SSH), de deux à sept votes, et un compteur de persistance qui passe de 1 à 3 sur trois évaluations consécutives, la décision d'isolation n'étant émise qu'à la troisième (figure~\ref{fig:logs_portscan}). C'est cet écart d'un ordre de grandeur entre régime nominal et régime d'attaque, combiné à l'exigence de trois évaluations anormales sur cinq, qui étouffe le bruit résiduel : une évaluation isolée au-delà du seuil ne déclenche aucune action.
+
 
 Après application du mécanisme de neutralisation sélective et de la protection ARP (\S\ref{subsec:diagnostic_suricata}), le système opère avec un taux de faux positifs global de \textbf{9,23\,\%} au niveau séquence (seuil $1,5\sigma$), absorbé en pratique par la persistance temporelle avant toute action de blocage, et un rappel variant structurellement de $<1\,\%$ (PortScan, attaques applicatives web) à $98\,\%$ (force brute FTP) selon le type d'attaque -- une hétérogénéité expliquée mécaniquement en \S\ref{subsec:limites_generalisation} et \S\ref{sec:limites_chapitre}, non un défaut de calibration.
 
