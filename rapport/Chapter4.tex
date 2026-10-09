@@ -115,7 +115,7 @@ Le cas d'utilisation principal de ce Sprint est le \textit{Triage et Traitement 
 \textbf{Post-conditions} & Un article est persisté en base avec un statut \texttt{PENDING} (menace technique) ou \texttt{PENDING\_FORMATION} (sensibilisation), ou rejeté sans effet de bord. \\ \hline
 
 \end{xltabular}
-
+\newpage
 \subsection{Conception}
 Cette section détaille l'architecture du sprint, la dynamique du pipeline, puis son modèle de données.
 
@@ -170,7 +170,7 @@ La figure~\ref{fig:journal_exec_agent_cti} montre la fenêtre de journal du tabl
 La figure~\ref{fig:gen_validate_regle_suricata} illustre le cycle complet d'une règle candidate : la carte générée par l'agent CTI pour la faille Citrix NetScaler (en bas), puis son déploiement réussi sur \texttt{vm-edge} par l'agent de déploiement (en haut), qui valide la syntaxe par un test à blanc avant l'injection et le rechargement à chaud de Suricata, et dont le statut passe à « Active en production ».
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.9\textwidth]{../screenshots/rule-deploy.png}
+    \includegraphics[width=0.8\textwidth]{../screenshots/rule-deploy.png}
     \caption{Génération et validation d'une règle Suricata candidate}
     \label{fig:gen_validate_regle_suricata}
 \end{figure}
@@ -250,10 +250,11 @@ La figure~\ref{fig:article_exist_indb} illustre la déduplication des articles :
 \subsection{Conclusion du sprint 4}
 Ce sprint a livré un agent \ac{CTI} autonome et local, capable de trier automatiquement le renseignement \ac{OSINT} entre menace technique et contenu de sensibilisation, tout en neutralisant les risques d'injection de contenu de faible qualité. Le sprint suivant exploite précisément la branche « sensibilisation » de ce triage pour s'attaquer à un autre maillon de la chaîne de sécurité~: le facteur humain.
 
+\newpage
 %==============================================================================
 \section{Sprint 5 : Mitigation du risque humain (agent Gemini et RAG LMS)}\label{sec:sprint5}
 %==============================================================================
-Le facteur humain demeure une cause majeure de compromission~: le rapport \ac{DBIR} de Verizon attribue à l'élément humain non malveillant environ 68\,\% des violations analysées~\cite{verizon2024dbir}. Ce sprint génère donc des parcours de sensibilisation personnalisés à partir des contenus classés \texttt{AWARENESS} par l'agent \ac{CTI} du sprint~4.
+Le facteur humain demeure une cause majeure de compromission~: le rapport \ac{DBIR} de Verizon attribue à l'élément humain non malveillant environ 68\,\% des violations analysées. Ce sprint génère donc des parcours de sensibilisation personnalisés à partir des contenus classés \texttt{AWARENESS} par l'agent \ac{CTI} du sprint~4.
 
 \subsection{Backlog du sprint 5}
 Le tableau~\ref{tab:backlog-s5} liste les user stories du sprint.
@@ -356,7 +357,7 @@ Le diagramme de la figure~\ref{fig:s5-seq} détaille les échanges entre le back
 Cette section présente l'implémentation et les interfaces du LMS.
 
 \subsubsection{Composants}
-La génération du module est implémentée côté backend (\texttt{server.js}, route \texttt{/api/formations/generate}) via la librairie unifiée \texttt{@google/genai}. La diffusion (\texttt{/api/formations/distribute}) est protégée par le middleware d'authentification \ac{JWT} et lit l'annuaire structuré par département (\texttt{employes.json}). L'authentification employé (\texttt{/api/employes/verify}) et la soumission de score (\texttt{/api/formations/submit}) sont exposées sans jeton, l'identifiant employé faisant office de clé d'accès au portail.
+La génération du module est implémentée côté backend (\texttt{server.js}, route /api/formations/generate) via la librairie unifiée \texttt{@google/genai}. La diffusion (\texttt{/api/formations/distribute}) est protégée par le middleware d'authentification \ac{JWT} et lit l'annuaire structuré par département (\texttt{employes.json}). L'authentification employé (\texttt{/api/employes/verify}) et la soumission de score (\texttt{/api/formations/submit}) sont exposées sans jeton, l'identifiant employé faisant office de clé d'accès au portail.
 
 \subsubsection{Interfaces et résultats}
 Les captures suivantes illustrent la chaîne complète.

@@ -117,18 +117,43 @@
 \include{front/Acronymes}
 
 \makeatletter
+\newif\if@mtc@numbered
 \renewcommand{\l@chapter}[2]{%
-  \addpenalty{-\@highpenalty}%
-  \vskip 1.0em \@plus\p@
-  \setlength\@tempdima{1.5em}%
   \begingroup
-    \parindent \z@
-    \rightskip \@tocrmarg
-    \parfillskip -\rightskip
-    \leavevmode
-    \advance\leftskip\@tempdima
-    {\bfseries Chapitre #1}
+    \@mtc@numberedfalse
+    \def\numberline##1{\@mtc@numberedtrue}%
+    \setbox\@tempboxa=\hbox{#1}%
   \endgroup
+  \if@mtc@numbered
+    \addpenalty{-\@highpenalty}%
+    \vskip 1.0em \@plus\p@
+    \setlength\@tempdima{1.5em}%
+    \begingroup
+      \parindent \z@
+      \rightskip \@tocrmarg
+      \parfillskip -\rightskip
+      \leavevmode
+      \advance\leftskip\@tempdima
+      \def\numberline##1{##1\ \ }%
+      {\bfseries Chapitre #1}%
+    \endgroup
+  \else
+    \ifnum \c@tocdepth >\m@ne
+      \addpenalty{\@secpenalty}%
+      \addvspace{1.0em \@plus\p@}%
+      \setlength\@tempdima{1.5em}%
+      \begingroup
+        \parindent \z@ \rightskip \@pnumwidth
+        \parfillskip -\@pnumwidth
+        \leavevmode \bfseries
+        \advance\leftskip\@tempdima
+        \hskip -\leftskip
+        #1\nobreak
+        \leaders\hbox{$\m@th\mkern \@dotsep mu\hbox{.}\mkern \@dotsep mu$}\hfill
+        \nobreak\hb@xt@\@pnumwidth{\hss #2}\par
+      \endgroup
+    \fi
+  \fi
 }
 \makeatother
 
@@ -164,28 +189,25 @@
 % Chapitres
 \include{chapters/Chapter1}
 \include{chapters/Chapter2}
-% \input{restructuration/methodologie}
 \include{chapters/Chapter3}
 \include{chapters/Chapter4}
-% \include{chapters/Chapter5}
 
-% \input{restructuration/release1}
-% \input{restructuration/release2}
-% \include{comparaison}
+
+
 \chapter*{Conclusion Générale}
-\addcontentsline{toc}{section}{\hspace*{-1.5em}\textbf{Conclusion Générale}}
+
+\addcontentsline{toc}{chapter}{\textbf{Conclusion Générale}}
 \markboth{Conclusion Générale}{Conclusion Générale}
-% \renewcommand\headrulewidth{1pt}
-% \fancyhead[R]{Conclusion Générale}
+\renewcommand\headrulewidth{1pt}
+\fancyhead[R]{Conclusion Générale}
 \input{front/ConclusionGenerale}
 
-% Bibliographie
 \renewcommand{\bibname}{Webographie}
 \cleardoublepage
 \phantomsection
-% \addcontentsline{toc}{section}{\hspace*{-1.5em}\textbf{Webographie}}
-% \markboth{Webographie}{Webographie}
-% \fancyhead[R]{\rightmark}
+\addcontentsline{toc}{chapter}{\textbf{Webographie}}
+\markboth{Webographie}{Webographie}
+\fancyhead[R]{\rightmark}
 
 \bibliographystyle{unsrt}
 \bibliography{biblio}
@@ -200,6 +222,6 @@
 \input{front/Abstract}
 
 % Dernière page PDF
-% \includepdf[pages=1]{files/plagiatPage.pdf}
+\includepdf[pages=1]{files/plagiatPage.pdf}
 
 \end{document}

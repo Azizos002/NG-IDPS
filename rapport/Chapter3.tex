@@ -88,7 +88,7 @@ Le cas d'utilisation principal est la \textit{Capture et Inspection Sémantique 
 \end{xltabular}
 
 
-\subsection{Conception Architecturale et Modèle de Capture}
+\subsection{Conception}
 La conception de la couche d'acquisition nécessite une compréhension pointue de l'orchestration des tâches asynchrones au niveau du système d'exploitation. La méthode de capture des paquets dicte la performance limite du \acrshort{nids}. Trois implémentations ont été évaluées :
 \begin{enumerate}
     \item \textit{PCAP (Packet Capture) :} Interface historique mais obsolète pour les hauts débits. Chaque paquet engendre un basculement de contexte (\textit{Context Switch}) entre l'espace noyau (\textit{Kernel Space}) et l'espace utilisateur (\textit{User Space}), entraînant une saturation CPU.
@@ -105,7 +105,7 @@ Afin de justifier notre choix pour le multithreading, le séquençage bas-niveau
     \label{fig:sequence_suricata}
 \end{figure}
 
-\subsection{Réalisation, Configuration et Mode d'Exécution}
+\subsection{Réalisation}
 La réalisation technique s'est traduite par l'installation du démon Suricata et l'édition experte du fichier de configuration \texttt{suricata.yaml}. La méthode de capture a été configurée sur \textbf{AF\_PACKET}.
 
 Pour maximiser les performances, le mode d'exécution des \textit{Threads} a été paramétré sur \textbf{Workers} (plutôt que \textit{AutoFP}). Dans ce modèle, le même thread (CPU core) est responsable de l'acquisition, du décodage et de la détection d'un même paquet, supprimant les verrous de synchronisation (\textit{Locks}) entre les cœurs.
@@ -122,7 +122,7 @@ En matière de bonne gouvernance système, nous avons établi une contrainte str
 % \end{figure}
 
 
-\subsection{Validation de la Télémétrie Sérialisée}
+\subsection{Validation}
 L'intégrité de la sérialisation des métadonnées applicatives, ainsi que la levée immédiate des alertes déterministes, sont validées par l'inspection du journal de sortie. L'objectif principal de l'activation d'\textit{EVE JSON} est de générer un format de données pivot, auto-descriptif et nativement ingérable par Apache Kafka, contournant les limitations syntaxiques des anciens fichiers de log plat (\texttt{fast.log}).
 
 L'extrait de log présenté par la figure \ref{fig:validation_eve_json} confirme la conformité du format JSON requis par les composants aval de notre architecture.
@@ -213,7 +213,7 @@ Le cas d'utilisation central de ce Sprint est le \textit{Routage Résilient et l
 \end{longtable}
 \end{center}
 
-\subsection{Conception Architecturale du Pipeline}
+\subsection{Conception}
 La conception s'appuie sur le paradigme de l'architecture \textit{Lambda}, garantissant un découplage strict entre la périphérie d'acquisition (\textit{Edge}) et les clusters analytiques distants. Ce découplage protège le système en cas de partition réseau : si la connexion avec le nœud ML est rompue, Kafka met en cache les événements, et Filebeat gère une file d'attente à rétroaction (\textit{Backpressure}). Les données sont transmises automatiquement dès le rétablissement de la connectivité sans aucune perte de paquets.
 
 \begin{figure}[H]
@@ -223,7 +223,7 @@ La conception s'appuie sur le paradigme de l'architecture \textit{Lambda}, garan
     \label{fig:sequence_elk_kafka}
 \end{figure}
 
-\subsection{Réalisation Technique et Optimisations MLOps}
+\subsection{Réalisation}
 Sur la VM Edge, le script \texttt{edge\_collector.py} (agissant en tant que \textit{Kafka Producer}) lit le descripteur du fichier \texttt{eve.json} en continu et expédie, pour chaque événement de type \texttt{flow}, un vecteur de caractéristiques normalisé vers le \textit{Topic} \texttt{network-features}.
 
 Un enseignement opérationnel important, établi ultérieurement lors de la campagne de diagnostic du Sprint 3 (\S\ref{subsec:diagnostic_suricata}), mérite d'être signalé ici~: le paramètre de regroupement des envois (\texttt{linger\_ms}) du producteur Kafka a été délibérément maintenu à sa valeur minimale (\texttt{linger\_ms=0}, envoi immédiat par message) plutôt que configuré en \textit{micro-batching}. Un essai de regroupement des messages a en effet été testé comme piste de réduction du bruit de détection généré par le trafic interne du pipeline lui-même ; il s'est révélé inefficace (les caractéristiques de type indicateur de drapeau TCP sont invariantes à la fréquence d'envoi) et contre-productif (l'augmentation de la taille de charge utile par envoi a dégradé d'autres caractéristiques). Cette configuration a donc été conservée à l'identique.
@@ -236,7 +236,7 @@ En parallèle, l'ETL (\textit{Extract, Transform, Load}) s'opère sur \textbf{Lo
 
 Enfin, le moteur d'indexation \textbf{Elasticsearch} a fait l'objet d'un \textit{Tuning} système. La taille de sa machine virtuelle Java (JVM) a été hardcodée (\texttt{-Xms1g -Xmx1g}) pour limiter la consommation de RAM. Sans cette limite, Elasticsearch tenterait d'absorber toute la mémoire disponible, risquant d'invoquer le processus \textit{OOM Killer} de Linux, ce qui ferait crasher l'entraînement de notre modèle IA sur la même machine.
 
-\subsection{Validation de la Télémétrie et du Découplage}
+\subsection{Validation}
 
 La robustesse théorique du pipeline décrite en conception ne vaut que si elle se vérifie en pratique. Cette section apporte trois preuves complémentaires de bon fonctionnement : la tolérance aux pannes du courtage Kafka, l'exactitude de l'enrichissement sémantique opéré par Logstash, et la capacité du tableau de bord à absorber le volume réel du trafic ingéré.
 
@@ -399,7 +399,7 @@ Recall -- PortScan & $\approx$ 0\,\% & $\approx$ 0\,\% (inchangé, cf. \S\ref{su
 \subsubsection{Mise à l'Échelle et Normalisation (Scaling)}
 Pour éviter la saturation des gradients (\textit{Vanishing/Exploding Gradients}) et la divergence de la fonction de perte durant la rétropropagation, les caractéristiques du dataset ont nécessité une mise à l'échelle stricte. L'utilisation d'un \texttt{StandardScaler} a été écartée au profit d'un \textbf{\texttt{MinMaxScaler}} (bornage strict sur l'intervalle $[0,1]$), ajusté \textbf{uniquement} sur le sous-ensemble d'entraînement bénin pour prévenir toute fuite d'information (\textit{data leakage}) entre les distributions d'entraînement et de test. Les cellules LSTM utilisant des fonctions d'activation non linéaires telles que la Sigmoïde ($\sigma(x) \in [0,1]$), l'injection de tenseurs strictement normalisés sur les mêmes asymptotes mathématiques accélère considérablement la convergence des poids synaptiques du réseau.
 
-\subsection{Conception : Architecture Mathématique du Deep LSTM-VAE}
+\subsection{Conception}
 \label{subsec:conception_mathematique}
 
 L'architecture développée au cœur de notre module d'intelligence artificielle fusionne la mémorisation récurrente avec l'inférence variationnelle. L'encodeur LSTM traite la fenêtre temporelle de trafic ($T=10$ pas de temps, séquences construites par IP source) et projette la séquence vers un espace latent $Z$ de dimension $D=16$ -- retenue à l'identique du nombre de caractéristiques d'entrée, un choix pragmatique de départ documenté ici comme tel plutôt que le fruit d'une recherche exhaustive d'hyperparamètre.
@@ -428,11 +428,11 @@ L'échantillonnage stochastique dans l'espace latent bloquant par définition le
 \mathbf{z} = \boldsymbol{\mu} + \exp\left(\frac{1}{2} \boldsymbol{\log\sigma^2}\right) \odot \boldsymbol{\epsilon} \quad \text{avec} \quad \boldsymbol{\epsilon} \sim \mathcal{N}(0,I)
 \end{equation}
 
-\subsection{Réalisation : Entraînement et Choix des Hyperparamètres}
+\subsection{Réalisation: Entraînement et choix des hyperparamètres}
 \label{subsec:fine_tuning}
 L'entraînement a été conduit avec l'optimiseur \textbf{Adam}, un \texttt{batch\_size} de 128, et le rappel Keras \texttt{EarlyStopping} (patience de 10 époques sur la perte de validation), évitant de fixer arbitrairement un nombre d'époques : l'entraînement s'interrompt organiquement lorsque \texttt{val\_loss} cesse de s'améliorer, et seuls les poids synaptiques optimaux sont restaurés et sérialisés. La taille de fenêtre temporelle ($T=10$) résulte d'un compromis pragmatique entre richesse contextuelle et latence d'inférence, plutôt que d'un balayage systématique -- un point explicitement identifié comme axe d'amélioration méthodologique (cf. Limites, \S\ref{subsec:limites_generalisation}).
 
-Le modèle déployé (architecture 64-32-16-32-64, seize caractéristiques, fenêtre de dix pas) a été entraîné en 4\,480 secondes, soit environ 1\,h\,15. Pour documenter le coût de la procédure, un réentraînement complet a été réalisé pour ce rapport : 11\,367 pas par époque, 16 à 17 millisecondes par pas, soit environ trois minutes par époque sur processeur, sans accélération matérielle. Prévu pour 50 époques au maximum, il s'est arrêté de lui-même à la dix-septième, la meilleure perte de validation ayant été atteinte à la septième. Ses seuils $\mu+1\sigma = 58,44$ et $\mu+3\sigma = 98,09$ sont à moins de 0,5\,\% de ceux du modèle déployé (58,28 et 97,62), ce qui confirme la reproductibilité de la procédure.
+Le modèle déployé (architecture 64-32-16-32-64, seize caractéristiques, fenêtre de dix pas) a été entraîné en 4\,480 secondes, soit environ 1\,h\,25. Pour documenter le coût de la procédure, un réentraînement complet a été réalisé pour ce rapport : 11\,367 pas par époque, 16 à 17 millisecondes par pas, soit environ trois minutes par époque sur processeur, sans accélération matérielle. Prévu pour 50 époques au maximum, il s'est arrêté de lui-même à la dix-septième, la meilleure perte de validation ayant été atteinte à la septième. Ses seuils $\mu+1\sigma = 58,44$ et $\mu+3\sigma = 98,09$ sont à moins de 0,5\,\% de ceux du modèle déployé (58,28 et 97,62), ce qui confirme la reproductibilité de la procédure.
 
 À l'issue de l'entraînement, l'erreur de reconstruction (MSE) sur le jeu de validation bénin a pour moyenne $\mu = 38,62$ et pour écart-type $\sigma = 19,67$. Le seuil de décision déployé en production est $\tau = \mu + 1,5\sigma = 68,12$, retenu après comparaison de quatre points de fonctionnement : l'optimum $F_1$ (37,77), $1,5\sigma$ (68,12), $2\sigma$ (77,95) et $3\sigma$ (97,62) (\S\ref{subsec:threshold_scaling}, tableau~\ref{tab:comparaison_seuils}). Ce seuil global est complété, pour la règle de vote, par seize seuils individuels fixés au 98\textsuperscript{e} percentile de l'erreur de chaque caractéristique sur le jeu de validation bénin.
 
@@ -490,10 +490,10 @@ $F_1$-optimal (37,77) & 48,32\,\% & 96,31\,\% & 100,00\,\% & 96,83\,\% & 100,00\
 3$\sigma$ (97,62) & 3,12\,\% & 50,90\,\% & 29,24\,\% & 22,22\,\% & 83,98\,\% \\ \hline
 
 \end{xltabular}
-
+\newpage
 Le seuil $1,5\sigma$ ($\tau = 68,12$) a été retenu comme point de fonctionnement opérationnel : il ramène le taux de faux positifs de 48,32\,\% (optimum $F_1$, inexploitable en production) à 9,23\,\%, tout en préservant le rappel sur les catégories les plus dégradées aux seuils supérieurs (FTP-Patator, Infiltration). Cette calibration est documentée et justifiée directement dans les métadonnées du modèle produites en fin d'entraînement, garantissant la traçabilité du choix.
 
-\subsection{Validation : Étude Comparative des Architectures de Détection}
+\subsection{Validation: Étude comparative des architectures de détection}
 \label{subsec:etude_comparative}
 Afin de valider objectivement le choix du LSTM-VAE face aux alternatives présentées en \S\ref{subsec:choix_algorithmique}, les trois architectures ont été entraînées et évaluées dans des conditions \textbf{strictement identiques} : mêmes 16 caractéristiques équilibrées, même jeu d'entraînement bénin, même jeu de test, même seuil recalibré pour chaque modèle selon la même méthodologie. L'Isolation Forest a été entraînée en mode non supervisé strict (\texttt{contamination='auto'}), sans aucune fuite de label. Le tableau \ref{tab:comparaison_modeles} synthétise les résultats.
 
@@ -526,7 +526,7 @@ Recall DDoS & 83,98\,\% & 84,31\,\% & 83,79\,\% \\ \hline
 Ce résultat, bien que le rappel global agrégé soit quasi identique entre les trois modèles ($\approx$ 50--52\,\%), révèle une divergence radicale par type d'attaque : \textbf{sans la composante variationnelle}, le LSTM-Autoencodeur perd intégralement la capacité de détection sur les attaques par force brute (0,00\,\% contre 98,01\,\%), tandis qu'\textbf{Isolation Forest}, dénué de toute modélisation temporelle, présente un taux de faux positifs prohibitif (57,36\,\%) en configuration non supervisée honnête. Ce résultat valide empiriquement, avec preuve chiffrée, les deux choix architecturaux justifiés qualitativement en \S\ref{subsec:choix_algorithmique} : la modélisation séquentielle (LSTM) est décisive pour les attaques répétitives, et la régularisation variationnelle (VAE) est décisive pour la sensibilité fine du détecteur.
 
 
-\subsection{Validation : Tests sur Données Synthétiques et Limites de Généralisation}
+\subsection{Validation: Tests sur données synthétiques}
 \label{subsec:limites_generalisation}
 Au-delà de l'évaluation statistique sur données réelles, deux familles de tests complémentaires ont été menées pour éprouver la robustesse du modèle dans des conditions contrôlées : des séquences synthétiques reproduisant fidèlement le profil statistique de chaque type d'attaque, puis des profils entièrement indépendants du jeu de données d'entraînement, afin de distinguer ce que le modèle a réellement appris de ce qu'il a simplement mémorisé.
 
@@ -546,7 +546,7 @@ Un test synthétique dédié, construit à partir du profil statistique réel de
 \subsubsection{Test de Généralisation Hors-Distribution}
 Un jeu de données artificiel, construit sans lecture d'aucune statistique CICIDS2017 (profils raisonnés à partir de connaissances réseau générales, exprimés en fractions de la plage normalisée apprise par le \texttt{MinMaxScaler}), a été soumis au modèle final. Après correction de deux artefacts méthodologiques identifiés en cours de test (encodage des drapeaux TCP en valeurs binaires plutôt que continues, variance temporelle artificiellement nulle), un profil de trafic bénin générique reste néanmoins classé comme anormal par le modèle. Ce résultat, honnête et reproductible sur trois tentatives indépendantes, illustre une propriété connue des détecteurs d'anomalies par reconstruction : la frontière de normalité apprise reflète une variété de corrélations conjointes spécifique à la distribution d'entraînement, non une région définie par des bornes indépendantes par variable. Cette limite est documentée comme telle en \S\ref{sec:limites_chapitre} et justifie \textit{a posteriori} le choix architectural d'un déploiement on-premise calibré localement plutôt qu'un modèle générique transférable tel quel.
 
-\subsection{Réalisation : Mécanismes de Cyber-Résilience et Inférence Temps Réel (Edge-to-ML)}
+\subsection{Réalisation: Mécanismes de cyber-résilience et inférence temps-réel (Edge-to-ml)}
 \label{subsec:cyber_resilience}
 Le démon d'orchestration Kafka (\texttt{realtime\_interface.py}) exécute le modèle en production. Au-delà de l'algorithmique IA, une ingénierie logicielle avancée a été codée pour garantir la survie de l'infrastructure de défense face aux attaques par épuisement de ressources (\textit{State Exhaustion}).
 
@@ -561,7 +561,7 @@ Le maintien d'un historique temporel indépendant pour chaque équipement du ré
 \subsubsection{Persistance Temporelle et Liste Blanche (Whitelist)}
 Afin de prévenir les tempêtes d'alertes (\textit{Alert Storm}), une décision de blocage n'est déclenchée que si une même IP source cumule au moins \textbf{3 évaluations anormales sur ses 5 dernières séquences} (\texttt{SEUIL\_PERSISTANCE=3}), absorbant les faux positifs isolés avant toute action automatique. Les actifs critiques déclarés (\texttt{actifs\_critiques.json}, gérable depuis le tableau de bord SOC) sont exemptés de l'action de blocage automatique -- l'anomalie reste néanmoins calculée, journalisée et visible par l'administrateur (\texttt{*** SÉCURITÉ WHITELIST ***}), garantissant qu'aucune usurpation d'identité whitelistée ne reste totalement invisible.
 
-\subsection{Validation : Diagnostic et Durcissement Sécuritaire en Conditions Réelles}
+\subsection{Validation: Diagnostic et durcissement sécuritaire en conditions réelles}
 \label{subsec:diagnostic_suricata}
 
 \subsubsection{Validation Face à des Attaques Réellement Exécutées}
