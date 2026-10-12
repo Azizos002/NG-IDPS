@@ -129,9 +129,10 @@ export default function IaActivityPage() {
       try {
         const response = await fetch(`${backendUrl}/api/incidents`);
         const data = await response.json();
-        
+        const rawIncidents = Array.isArray(data) ? data : (data.incidents || []); // backend renvoie désormais { incidents, total }
+
         // On ne garde que les incidents qui ont fait appel à l'IA (qui ont un aiSummary ou un diagnostic_json)
-        const aiData = data
+        const aiData = rawIncidents
           .filter((inc: any) => inc.aiSummary || inc.diagnostic_json)
           .map((inc: any) => ({
             ...inc,

@@ -126,6 +126,7 @@ const AiReportFormatter = ({ data, fallbackText }: { data?: DiagnosticJSON, fall
 // ==========================================
 export default function IncidentsPage() {
   const [incidents, setIncidents] = useState<AlertData[]>([]);
+  const [totalCount, setTotalCount] = useState<number>(0); // Compte RÉEL en base (découplé de la pagination)
   const [wsConnected, setWsConnected] = useState(false);
   const [activeFilter, setActiveFilter] = useState<"OPEN" | "RESOLVED" | "ALL">("OPEN");
 
@@ -321,12 +322,14 @@ export default function IncidentsPage() {
       try {
         const response = await fetch(`${backendUrl}/api/incidents`);
         const data = await response.json();
-        const formattedData = data.map((inc: any) => ({
+        const rawIncidents = Array.isArray(data) ? data : (data.incidents || []); // compat si l'ancien format []  est encore servi
+        const formattedData = rawIncidents.map((inc: any) => ({
           ...inc,
           id: inc._id,
           timestamp: new Date(inc.timestamp).toLocaleString("fr-FR", { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
         }));
         setIncidents(formattedData);
+        setTotalCount(typeof data.total === "number" ? data.total : formattedData.length);
       } catch (error) {
         console.error("[-] Impossible de charger l'historique :", error);
       }
@@ -346,6 +349,7 @@ export default function IncidentsPage() {
         timestamp: new Date(data.timestamp || Date.now()).toLocaleString("fr-FR", { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
       };
       setIncidents((prev) => [newIncident, ...prev]);
+      setTotalCount((prev) => prev + 1); // Un vrai nouvel incident est entré en base côté backend
     });
 
     socket.on("soar_incident_updated", (updatedIncident: any) => {
@@ -435,7 +439,7 @@ export default function IncidentsPage() {
           onClick={() => setActiveFilter("ALL")}
           className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-semibold transition-all ${activeFilter === "ALL" ? "bg-slate-700 text-white shadow-inner" : "text-slate-400 hover:text-slate-200"}`}
         >
-          Tous ({incidents.length})
+          Tous ({totalCount})
         </button>
       </div>
 

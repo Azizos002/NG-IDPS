@@ -92,10 +92,14 @@ export default function DashboardOverview() {
         try {
             // 1. Appel des incidents depuis MongoDB (collection soarcases)
             const resIncidents = await fetch(`${backendUrl}/api/incidents`);
-            const incidents = await resIncidents.json();
+            const incidentsPayload = await resIncidents.json();
+            // Le backend renvoie désormais { incidents, total } ; 'total' est le COMPTE RÉEL en base,
+            // indépendant du plafond de pagination appliqué à la liste 'incidents'.
+            const incidents = Array.isArray(incidentsPayload) ? incidentsPayload : (incidentsPayload.incidents || []);
+            const realTotal = Array.isArray(incidentsPayload) ? incidents.length : (incidentsPayload.total ?? incidents.length);
 
             if (Array.isArray(incidents)) {
-                setTotalIncidents(incidents.length);
+                setTotalIncidents(realTotal);
 
                 // --- KPI: CALCUL DYNAMIQUE DU SCORE DE CONFIANCE MOYEN ---
                 if (incidents.length > 0) {
@@ -257,7 +261,7 @@ export default function DashboardOverview() {
 
     useEffect(() => {
         // Définir le titre initial du document
-        document.title = "Dashboard SOC | PFE";
+        document.title = "Dashboard SOC";
 
         const currentHost = window.location.hostname;
         const backendUrl = `http://${currentHost}:4000`;
@@ -558,7 +562,7 @@ export default function DashboardOverview() {
                         </div>
                     </div>
                     <p className="text-xs text-slate-500 mt-5 pt-4 border-t border-slate-800">
-                        Sensibilisation post-incident des collaborateurs (Sprint 5)
+                        Sensibilisation post-incident des collaborateurs
                     </p>
                 </div>
             </div>

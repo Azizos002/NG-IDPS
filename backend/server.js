@@ -8,6 +8,9 @@ const fs = require('fs');
 const path = require('path');
 const { Kafka } = require('kafkajs');
 const jwt = require('jsonwebtoken');
+const PDFDocument = require('pdfkit');
+
+const LOGO_PATH = path.join(__dirname, 'assets', 'ngidps_logo_fixed.png');
 
 
 const { GoogleGenAI } = require('@google/genai');
@@ -144,6 +147,7 @@ const FormationRecordSchema = new mongoose.Schema({
   courseTitle: String,
   employeeId: String,
   employeeName: String,
+  employeeEmail: String,
   department: String,
   score: Number,
   completedAt: { type: Date, default: Date.now }
@@ -540,8 +544,16 @@ app.get('/api/cti-actualities', async (req, res) => {
 
 app.get('/api/incidents', async (req, res) => {
   try {
-    const history = await SoarCase.find().sort({ timestamp: -1 }).limit(50);
-    res.json(history);
+    // 'limit' reste optionnel et borné pour éviter un dump complet de la base,
+    // mais 'total' reflète le COMPTE RÉEL de documents, indépendamment de la pagination.
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+
+    const [history, total] = await Promise.all([
+      SoarCase.find().sort({ timestamp: -1 }).limit(limit),
+      SoarCase.countDocuments()
+    ]);
+
+    res.json({ incidents: history, total });
   } catch (error) {
     res.status(500).json({ error: "Erreur lors de la lecture de la base de données" });
   }
@@ -1375,6 +1387,151 @@ app.get('/api/formations/records', verifySOCAdmin, async (req, res) => {
     res.json(records);
   } catch (error) {
     res.status(500).json({ error: "Erreur de lecture des résultats." });
+  }
+});
+
+
+function genererCertificatPDF({ employeeName, courseTitle, courseDescription, score, completedAt }) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 0 });
+    const chunks = [];
+    doc.on('data', (c) => chunks.push(c));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    const W = doc.page.width;
+    const H = doc.page.height;
+
+    const NAVY = '#0F172A', CYAN = '#22D3EE', CYAN_D = '#06B6D4';
+    const RED = '#EF4444', GREY = '#64748B', GREY_L = '#94A3B8';
+
+    doc.rect(0, 0, W, H).fill('#FFFFFF');
+
+    const bandeW = 190;
+    doc.rect(0, 0, bandeW, H).fill(NAVY);
+    doc.rect(bandeW - 4, 0, 4, H).fill(CYAN);
+
+    const logoW = 120;
+    doc.image(LOGO_PATH, (bandeW - logoW) / 2, 60, { width: logoW });
+
+    doc.fontSize(7.5).fillColor(CYAN).font('Helvetica-Bold')
+       .text('CYBERDÉFENSE ACTIVE', 0, 230, { width: bandeW, align: 'center', characterSpacing: 1 });
+
+    doc.moveTo(bandeW / 2 - 20, 255).lineTo(bandeW / 2 + 20, 255).lineWidth(1).strokeColor(CYAN).stroke();
+
+    doc.fontSize(8.5).fillColor(GREY_L).font('Helvetica')
+       .text('Programme de\nSensibilisation à la\nCybersécurité', 25, 272, { width: bandeW - 50, align: 'center', lineGap: 3 });
+
+    doc.circle(bandeW / 2, H - 70, 5).fill(RED);
+    doc.fontSize(7).fillColor(GREY_L).font('Helvetica')
+       .text("Centre d'Opérations\nde Sécurité Autonome", 20, H - 55, { width: bandeW - 40, align: 'center', lineGap: 2 });
+
+    const padX = 40;
+    const zoneX = bandeW + padX;
+    const zoneW = W - bandeW - padX * 2;
+
+    doc.rect(zoneX, 30, zoneW, H - 60).lineWidth(1).strokeColor('#E2E8F0').stroke();
+    doc.rect(zoneX + 10, 40, zoneW - 20, H - 80).lineWidth(0.5).strokeColor(CYAN_D).dash(2, { space: 3 }).stroke().undash();
+
+    let y = 75;
+    doc.fontSize(11).fillColor(CYAN_D).font('Helvetica-Bold')
+       .text('CERTIFICAT DE RÉUSSITE', zoneX, y, { width: zoneW, align: 'center', characterSpacing: 3 });
+
+    y += 22;
+    doc.moveTo(zoneX + zoneW / 2 - 35, y).lineTo(zoneX + zoneW / 2 + 35, y).lineWidth(1.5).strokeColor(RED).stroke();
+
+    y += 30;
+    doc.fontSize(11).fillColor(GREY).font('Helvetica')
+       .text('Ce certificat est décerné à', zoneX, y, { width: zoneW, align: 'center' });
+
+    y += 22;
+    doc.fontSize(30).fillColor(NAVY).font('Helvetica-Bold')
+       .text(employeeName, zoneX, y, { width: zoneW, align: 'center' });
+
+    y += 48;
+    doc.fontSize(11).fillColor(GREY).font('Helvetica')
+       .text('pour avoir complété avec succès le module de formation', zoneX, y, { width: zoneW, align: 'center' });
+
+    y += 24;
+    doc.fontSize(16).fillColor(CYAN_D).font('Helvetica-Bold')
+       .text(`« ${courseTitle} »`, zoneX + 20, y, { width: zoneW - 40, align: 'center' });
+
+    y = doc.y + 14;
+    if (courseDescription) {
+      doc.fontSize(9.5).fillColor(GREY).font('Helvetica-Oblique')
+         .text(courseDescription, zoneX + 60, y, { width: zoneW - 120, align: 'center', lineGap: 2 });
+    }
+
+    const footY = H - 140;
+    const colW = zoneW / 3;
+
+    doc.fontSize(9).fillColor(GREY_L).font('Helvetica')
+       .text('SCORE OBTENU', zoneX, footY, { width: colW, align: 'center', characterSpacing: 1 });
+    doc.fontSize(20).fillColor(NAVY).font('Helvetica-Bold')
+       .text(`${score}%`, zoneX, footY + 14, { width: colW, align: 'center' });
+
+    doc.moveTo(zoneX + colW, footY).lineTo(zoneX + colW, footY + 45).lineWidth(0.5).strokeColor('#E2E8F0').stroke();
+    doc.moveTo(zoneX + colW * 2, footY).lineTo(zoneX + colW * 2, footY + 45).lineWidth(0.5).strokeColor('#E2E8F0').stroke();
+
+    doc.fontSize(9).fillColor(GREY_L).font('Helvetica')
+       .text('DATE DE VALIDATION', zoneX + colW, footY, { width: colW, align: 'center', characterSpacing: 1 });
+    doc.fontSize(13).fillColor(NAVY).font('Helvetica-Bold')
+       .text(new Date(completedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }),
+             zoneX + colW, footY + 17, { width: colW, align: 'center' });
+
+    const ref = `NGIDPS-${new Date(completedAt).getFullYear()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+    doc.fontSize(9).fillColor(GREY_L).font('Helvetica')
+       .text('RÉFÉRENCE', zoneX + colW * 2, footY, { width: colW, align: 'center', characterSpacing: 1 });
+    doc.fontSize(10).fillColor(NAVY).font('Courier-Bold')
+       .text(ref, zoneX + colW * 2, footY + 17, { width: colW, align: 'center' });
+
+    doc.fontSize(7.5).fillColor(GREY_L).font('Helvetica')
+       .text('Document généré automatiquement par la plateforme NG-IDPS — Cyberdéfense Active',
+             zoneX, H - 48, { width: zoneW, align: 'center' });
+
+    doc.end();
+  });
+}
+
+
+const SEUIL_REUSSITE = 70;
+
+app.post('/api/formations/submit', async (req, res) => {
+  try {
+    const { courseId, courseTitle, employeeId, employeeName, employeeEmail, department, score } = req.body;
+
+    const record = await FormationRecord.findOneAndUpdate(
+      { courseId, employeeId },
+      { courseTitle, employeeName, employeeEmail, department, score, completedAt: Date.now() },
+      { upsert: true, new: true }
+    );
+
+    console.log(`[🎓 LMS] Résultat enregistré : ${employeeName} a obtenu ${score}% au module "${courseTitle.substring(0, 20)}..."`);
+
+    if (score >= SEUIL_REUSSITE && employeeEmail) {
+      try {
+        const pdfBuffer = await genererCertificatPDF(record);
+        transporter.sendMail({
+          from: '"NG-IDPS SOC Formation" <zed.legacy.02@gmail.com>',
+          to: employeeEmail,
+          subject: `🎓 Certificat de réussite -- ${courseTitle}`,
+          html: `<p>Bonjour ${employeeName},</p>
+                 <p>Félicitations ! Vous avez réussi le module <strong>${courseTitle}</strong> avec un score de <strong>${score}%</strong>.</p>
+                 <p>Votre certificat est joint à cet e-mail.</p>`,
+          attachments: [{ filename: `certificat_${courseId}.pdf`, content: pdfBuffer }]
+        }, (error) => {
+          if (error) console.error('[-] Échec envoi certificat :', error);
+          else console.log(`[+] Certificat envoyé à ${employeeEmail}`);
+        });
+      } catch (pdfErr) {
+        console.error('[-] Échec génération certificat :', pdfErr);
+      }
+    }
+
+    res.json({ success: true, record });
+  } catch (error) {
+    console.error("[-] Erreur lors de l'enregistrement du score :", error);
+    res.status(500).json({ error: "Erreur serveur." });
   }
 });
 

@@ -40,7 +40,8 @@ export default function InfrastructurePage() {
             services: [
                 { name: "Suricata (NIDS)", backendName: "suricata", active: false },
                 { name: "Filebeat (Shipper)", backendName: "filebeat", active: false },
-                { name: "Edge Collector", backendName: "edge_collector.py", active: false }
+                { name: "Edge Collector", backendName: "edge_collector.py", active: false },
+                // { name: "Agent deploy-rules", backendName: "deploy_agent.py", active: false }
             ]
         },
         {

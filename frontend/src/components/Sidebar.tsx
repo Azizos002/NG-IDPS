@@ -30,7 +30,8 @@ export default function Sidebar({ isOpen }: SidebarProps) {
       try {
         const response = await fetch(`${backendUrl}/api/incidents`);
         const data = await response.json();
-        setIncidents(data);
+        const rawIncidents = Array.isArray(data) ? data : (data.incidents || []); // backend renvoie désormais { incidents, total }
+        setIncidents(rawIncidents);
       } catch (error) {
         console.error("[-] Impossible de charger l'historique pour la sidebar :", error);
       }
